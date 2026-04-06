@@ -1,0 +1,32 @@
+{
+  "name": "claude-code-cache-fix",
+  "version": "1.0.0",
+  "description": "Fixes prompt cache regression in Claude Code that causes up to 20x cost increase on resumed sessions",
+  "type": "module",
+  "exports": "./preload.mjs",
+  "main": "./preload.mjs",
+  "files": [
+    "preload.mjs"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "prompt-cache",
+    "cache-fix",
+    "anthropic",
+    "cost-optimization"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnighswonger/claude-code-cache-fix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cnighswonger/claude-code-cache-fix/issues"
+  },
+  "homepage": "https://github.com/cnighswonger/claude-code-cache-fix#readme",
+  "license": "MIT",
+  "author": "Chris Nighswonger"
+}
