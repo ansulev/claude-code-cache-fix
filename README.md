@@ -113,6 +113,12 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 
+## Support
+
+If this tool saved you money, consider buying me a coffee:
+
+<a href="https://buymeacoffee.com/vsits" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
 ## License
 
 [MIT](LICENSE)
