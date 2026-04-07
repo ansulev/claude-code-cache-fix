@@ -170,6 +170,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 ## Related research
 
 - **[@ArkNill/claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis)** — Systematic proxy-based analysis of 7 bugs including microcompact, budget enforcement, false rate limiter, and extended thinking quota impact. The monitoring features in v1.1.0 are informed by this research.
+- **[@Renvect/X-Ray-Claude-Code-Interceptor](https://github.com/Renvect/X-Ray-Claude-Code-Interceptor)** — Diagnostic HTTPS proxy with real-time dashboard, system prompt section diffing, per-tool stripping thresholds, and multi-stream JSONL logging. Works with any Claude client that supports `ANTHROPIC_BASE_URL` (CLI, VS Code extension, desktop app), complementing this package's CLI-only `NODE_OPTIONS` approach.
 
 ## Contributors
 
