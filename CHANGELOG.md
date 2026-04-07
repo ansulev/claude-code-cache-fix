@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0 (2026-04-07)
+
+- **Prefix lock content hash guard** — Additional safety guard hashes all non-system-reminder user content in messages[0]. Prevents prefix lock from firing if substantive context changed between sessions, even if the first 200 chars match.
+
 ## 1.1.0 (2026-04-07)
 
 New features:
