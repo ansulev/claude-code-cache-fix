@@ -8,51 +8,42 @@
 //   later user messages instead of messages[0]. This breaks the prompt cache
 //   prefix match. Fix: relocate them to messages[0] on every API call.
 //   (github.com/anthropics/claude-code/issues/34629)
-//   (github.com/anthropics/claude-code/issues/43657)
-//   (github.com/anthropics/claude-code/issues/44045)
 //
 // Bug 2: Fingerprint instability
 //   The cc_version fingerprint in the attribution header is computed from
 //   messages[0] content INCLUDING meta/attachment blocks. When those blocks
-//   change between turns, the fingerprint changes -> system prompt bytes
-//   change -> cache bust. Fix: recompute fingerprint from real user text.
+//   change between turns, the fingerprint changes, busting cache within the
+//   same session. Fix: stabilize the fingerprint from the real user message.
 //   (github.com/anthropics/claude-code/issues/40524)
 //
-// Bug 3: Non-deterministic tool schema ordering
-//   Tool definitions can arrive in different orders between turns, changing
-//   request bytes and busting cache. Fix: sort tools alphabetically by name.
+// Bug 3: Image carry-forward in conversation history
+//   Images read via the Read tool persist as base64 in conversation history
+//   and are sent on every subsequent API call. A single 500KB image costs
+//   ~62,500 tokens per turn in carry-forward. Fix: strip base64 image blocks
+//   from tool_result content older than N user turns.
+//   Set CACHE_FIX_IMAGE_KEEP_LAST=N to enable (default: 0 = disabled).
+//   (github.com/anthropics/claude-code/issues/40524)
 //
-// Based on community work by @VictorSun92 (original monkey-patch + partial
-// scatter fixes) and @jmarianski (MITM proxy root cause analysis).
+// Monitoring:
+//   - GrowthBook flag dump on first API call (CACHE_FIX_DEBUG=1)
+//   - Microcompact / budget enforcement detection (logs cleared tool results)
+//   - False rate limiter detection (model: "<synthetic>")
+//   - Quota utilization tracking (writes ~/.claude/quota-status.json)
+//   - Prefix snapshot diffing across process restarts (CACHE_FIX_PREFIXDIFF=1)
 //
-// Usage: NODE_OPTIONS="--import claude-code-cache-fix" claude
+// Based on community fix by @VictorSun92 / @jmarianski (issue #34629),
+// enhanced with fingerprint stabilization, image stripping, and monitoring.
+// Bug research informed by @ArkNill's claude-code-hidden-problem-analysis.
+//
+// Load via: NODE_OPTIONS="--import $HOME/.claude/cache-fix-preload.mjs"
 
 import { createHash } from "node:crypto";
-import { appendFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 
-// ---------------------------------------------------------------------------
-// Debug logging (writes to ~/.claude/cache-fix-debug.log)
-// Set CACHE_FIX_DEBUG=1 to enable
-// ---------------------------------------------------------------------------
-
-const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
-const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
-
-function debugLog(...args) {
-  if (!DEBUG) return;
-  const line = `[${new Date().toISOString()}] ${args.join(" ")}\n`;
-  try {
-    appendFileSync(LOG_PATH, line);
-  } catch {}
-}
-
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Fingerprint stabilization (Bug 2)
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 
-// Must match Claude Code src/utils/fingerprint.ts exactly.
+// Must match src/utils/fingerprint.ts exactly.
 const FINGERPRINT_SALT = "59cf53e54c78";
 const FINGERPRINT_INDICES = [4, 7, 20];
 
@@ -77,20 +68,14 @@ function extractRealUserMessageText(messages) {
     if (msg.role !== "user") continue;
     const content = msg.content;
     if (!Array.isArray(content)) {
-      if (
-        typeof content === "string" &&
-        !content.startsWith("<system-reminder>")
-      ) {
+      if (typeof content === "string" && !content.startsWith("<system-reminder>")) {
         return content;
       }
       continue;
     }
+    // Find first text block that isn't a system-reminder
     for (const block of content) {
-      if (
-        block.type === "text" &&
-        typeof block.text === "string" &&
-        !block.text.startsWith("<system-reminder>")
-      ) {
+      if (block.type === "text" && typeof block.text === "string" && !block.text.startsWith("<system-reminder>")) {
         return block.text;
       }
     }
@@ -100,17 +85,14 @@ function extractRealUserMessageText(messages) {
 
 /**
  * Extract current cc_version from system prompt blocks and recompute with
- * stable fingerprint. Returns { attrIdx, newText, oldFingerprint, stableFingerprint }
- * or null if no fix needed.
+ * stable fingerprint. Returns { oldVersion, newVersion, stableFingerprint }.
  */
 function stabilizeFingerprint(system, messages) {
   if (!Array.isArray(system)) return null;
 
+  // Find the attribution header block
   const attrIdx = system.findIndex(
-    (b) =>
-      b.type === "text" &&
-      typeof b.text === "string" &&
-      b.text.includes("x-anthropic-billing-header:")
+    (b) => b.type === "text" && typeof b.text === "string" && b.text.includes("x-anthropic-billing-header:")
   );
   if (attrIdx === -1) return null;
 
@@ -118,13 +100,14 @@ function stabilizeFingerprint(system, messages) {
   const versionMatch = attrBlock.text.match(/cc_version=([^;]+)/);
   if (!versionMatch) return null;
 
-  const fullVersion = versionMatch[1]; // e.g. "2.1.92.a3f"
+  const fullVersion = versionMatch[1]; // e.g. "2.1.87.a3f"
   const dotParts = fullVersion.split(".");
   if (dotParts.length < 4) return null;
 
-  const baseVersion = dotParts.slice(0, 3).join("."); // "2.1.92"
+  const baseVersion = dotParts.slice(0, 3).join("."); // "2.1.87"
   const oldFingerprint = dotParts[3]; // "a3f"
 
+  // Compute stable fingerprint from real user text
   const realText = extractRealUserMessageText(messages);
   const stableFingerprint = computeFingerprint(realText, baseVersion);
 
@@ -139,38 +122,28 @@ function stabilizeFingerprint(system, messages) {
   return { attrIdx, newText, oldFingerprint, stableFingerprint };
 }
 
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Resume message relocation (Bug 1)
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 
 function isSystemReminder(text) {
   return typeof text === "string" && text.startsWith("<system-reminder>");
 }
-
+// FIX: Match block headers with startsWith to avoid false positives from
+// quoted content (e.g. "Note:" file-change reminders embedding debug logs).
 const SR = "<system-reminder>\n";
-
 function isHooksBlock(text) {
-  return (
-    isSystemReminder(text) && text.substring(0, 200).includes("hook success")
-  );
+  // Hooks block header varies; fall back to head-region check
+  return isSystemReminder(text) && text.substring(0, 200).includes("hook success");
 }
 function isSkillsBlock(text) {
-  return (
-    typeof text === "string" &&
-    text.startsWith(SR + "The following skills are available")
-  );
+  return typeof text === "string" && text.startsWith(SR + "The following skills are available");
 }
 function isDeferredToolsBlock(text) {
-  return (
-    typeof text === "string" &&
-    text.startsWith(SR + "The following deferred tools are now available")
-  );
+  return typeof text === "string" && text.startsWith(SR + "The following deferred tools are now available");
 }
 function isMcpBlock(text) {
-  return (
-    typeof text === "string" &&
-    text.startsWith(SR + "# MCP Server Instructions")
-  );
+  return typeof text === "string" && text.startsWith(SR + "# MCP Server Instructions");
 }
 function isRelocatableBlock(text) {
   return (
@@ -208,18 +181,21 @@ function stripSessionKnowledge(text) {
 }
 
 /**
- * Core fix: on EVERY API call, scan the entire message array for the LATEST
+ * Core fix: on EVERY call, scan the entire message array for the LATEST
  * relocatable blocks (skills, MCP, deferred tools, hooks) and ensure they
  * are in messages[0]. This matches fresh session behavior where attachments
- * are always prepended to messages[0].
+ * are always prepended to messages[0] on every API call.
  *
- * The v2.1.90 native fix has a remaining detection gap: it bails early if
- * it sees *some* relocatable blocks in messages[0], missing the case where
- * others have scattered elsewhere (partial scatter).
+ * The original community fix only checked the last user message, which
+ * broke on subsequent turns because:
+ *   - Call 1: skills in last msg → relocated to messages[0] (3 blocks)
+ *   - Call 2: in-memory state unchanged, skills now in a middle msg,
+ *     last msg has no relocatable blocks → messages[0] back to 2 blocks
+ *   - Prefix changed → cache bust
  *
  * This version scans backwards to find the latest instance of each
  * relocatable block type, removes them from wherever they are, and
- * prepends them to messages[0] in fresh-session order. Idempotent.
+ * prepends them to messages[0]. Idempotent across calls.
  */
 function normalizeResumeMessages(messages) {
   if (!Array.isArray(messages) || messages.length < 2) return messages;
@@ -236,13 +212,11 @@ function normalizeResumeMessages(messages) {
   const firstMsg = messages[firstUserIdx];
   if (!Array.isArray(firstMsg?.content)) return messages;
 
-  // Check if ANY relocatable blocks are scattered outside first user msg.
+  // FIX: Check if ANY relocatable blocks are scattered outside first user msg.
+  // The old check (firstAlreadyHas → skip) missed partial scatter where some
+  // blocks stay in messages[0] but others drift to later messages (v2.1.89+).
   let hasScatteredBlocks = false;
-  for (
-    let i = firstUserIdx + 1;
-    i < messages.length && !hasScatteredBlocks;
-    i++
-  ) {
+  for (let i = firstUserIdx + 1; i < messages.length && !hasScatteredBlocks; i++) {
     const msg = messages[i];
     if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
     for (const block of msg.content) {
@@ -254,8 +228,8 @@ function normalizeResumeMessages(messages) {
   }
   if (!hasScatteredBlocks) return messages;
 
-  // Scan ALL user messages in reverse to collect the LATEST version of each
-  // block type. This handles both full and partial scatter.
+  // Scan ALL user messages (including first) in reverse to collect the LATEST
+  // version of each block type. This handles both full and partial scatter.
   const found = new Map();
 
   for (let i = messages.length - 1; i >= firstUserIdx; i--) {
@@ -267,6 +241,7 @@ function normalizeResumeMessages(messages) {
       const text = block.text || "";
       if (!isRelocatableBlock(text)) continue;
 
+      // Determine block type for dedup
       let blockType;
       if (isSkillsBlock(text)) blockType = "skills";
       else if (isMcpBlock(text)) blockType = "mcp";
@@ -274,6 +249,7 @@ function normalizeResumeMessages(messages) {
       else if (isHooksBlock(text)) blockType = "hooks";
       else continue;
 
+      // Keep only the LATEST (first found scanning backwards)
       if (!found.has(blockType)) {
         let fixedText = text;
         if (blockType === "hooks") fixedText = stripSessionKnowledge(text);
@@ -287,17 +263,15 @@ function normalizeResumeMessages(messages) {
 
   if (found.size === 0) return messages;
 
-  // Remove ALL relocatable blocks from ALL user messages
+  // Remove ALL relocatable blocks from ALL user messages (both first and later)
   const result = messages.map((msg) => {
     if (msg.role !== "user" || !Array.isArray(msg.content)) return msg;
-    const filtered = msg.content.filter(
-      (b) => !isRelocatableBlock(b.text || "")
-    );
+    const filtered = msg.content.filter((b) => !isRelocatableBlock(b.text || ""));
     if (filtered.length === msg.content.length) return msg;
     return { ...msg, content: filtered };
   });
 
-  // Order must match fresh session layout: deferred -> mcp -> skills -> hooks
+  // FIX: Order must match fresh session layout: deferred → mcp → skills → hooks
   const ORDER = ["deferred", "mcp", "skills", "hooks"];
   const toRelocate = ORDER.filter((t) => found.has(t)).map((t) => found.get(t));
 
@@ -309,12 +283,95 @@ function normalizeResumeMessages(messages) {
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Tool schema stabilization (Bug 3)
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+// Image stripping from old tool results (cost optimization)
+// --------------------------------------------------------------------------
+
+// CACHE_FIX_IMAGE_KEEP_LAST=N  — keep images only in the last N user messages.
+// Unset or 0 = disabled (all images preserved, backward compatible).
+// Images in tool_result blocks older than N user messages from the end are
+// replaced with a text placeholder. User-pasted images (direct image blocks
+// in user messages, not inside tool_result) are left alone.
+const IMAGE_KEEP_LAST = parseInt(process.env.CACHE_FIX_IMAGE_KEEP_LAST || "0", 10);
 
 /**
- * Sort tool definitions by name for deterministic ordering.
+ * Strip base64 image blocks from tool_result content in older messages.
+ * Returns { messages, stats } where stats has stripping metrics.
+ */
+function stripOldToolResultImages(messages, keepLast) {
+  if (!keepLast || keepLast <= 0 || !Array.isArray(messages)) {
+    return { messages, stats: null };
+  }
+
+  // Find user message indices (turns) so we can count from the end
+  const userMsgIndices = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "user") userMsgIndices.push(i);
+  }
+
+  if (userMsgIndices.length <= keepLast) {
+    return { messages, stats: null }; // not enough turns to strip anything
+  }
+
+  // Messages at or after this index are "recent" — keep their images
+  const cutoffIdx = userMsgIndices[userMsgIndices.length - keepLast];
+
+  let strippedCount = 0;
+  let strippedBytes = 0;
+
+  const result = messages.map((msg, msgIdx) => {
+    // Only process user messages before the cutoff (tool_result is in user msgs)
+    if (msg.role !== "user" || msgIdx >= cutoffIdx || !Array.isArray(msg.content)) {
+      return msg;
+    }
+
+    let msgModified = false;
+    const newContent = msg.content.map((block) => {
+      // Only strip images inside tool_result blocks, not user-pasted images
+      if (block.type === "tool_result" && Array.isArray(block.content)) {
+        let toolModified = false;
+        const newToolContent = block.content.map((item) => {
+          if (item.type === "image") {
+            strippedCount++;
+            if (item.source?.data) {
+              strippedBytes += item.source.data.length;
+            }
+            toolModified = true;
+            return {
+              type: "text",
+              text: "[image stripped from history — file may still be on disk]",
+            };
+          }
+          return item;
+        });
+        if (toolModified) {
+          msgModified = true;
+          return { ...block, content: newToolContent };
+        }
+      }
+      return block;
+    });
+
+    if (msgModified) {
+      return { ...msg, content: newContent };
+    }
+    return msg;
+  });
+
+  const stats = strippedCount > 0
+    ? { strippedCount, strippedBytes, estimatedTokens: Math.ceil(strippedBytes * 0.125) }
+    : null;
+
+  return { messages: strippedCount > 0 ? result : messages, stats };
+}
+
+// --------------------------------------------------------------------------
+// Tool schema stabilization (Bug 2 secondary cause)
+// --------------------------------------------------------------------------
+
+/**
+ * Sort tool definitions by name for deterministic ordering. Tool schema bytes
+ * changing mid-session was acknowledged as a bug in the v2.1.88 changelog.
  */
 function stabilizeToolOrder(tools) {
   if (!Array.isArray(tools) || tools.length === 0) return tools;
@@ -325,9 +382,228 @@ function stabilizeToolOrder(tools) {
   });
 }
 
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Fetch interceptor
-// ---------------------------------------------------------------------------
+// --------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------
+// Debug logging (writes to ~/.claude/cache-fix-debug.log)
+// Set CACHE_FIX_DEBUG=1 to enable
+// --------------------------------------------------------------------------
+
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
+const PREFIXDIFF = process.env.CACHE_FIX_PREFIXDIFF === "1";
+const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
+const SNAPSHOT_DIR = join(homedir(), ".claude", "cache-fix-snapshots");
+
+function debugLog(...args) {
+  if (!DEBUG) return;
+  const line = `[${new Date().toISOString()}] ${args.join(" ")}\n`;
+  try { appendFileSync(LOG_PATH, line); } catch {}
+}
+
+// --------------------------------------------------------------------------
+// Prefix snapshot — captures message prefix for cross-process diff.
+// Set CACHE_FIX_PREFIXDIFF=1 to enable.
+//
+// On each API call: saves JSON of first 5 messages + system + tools hash
+// to ~/.claude/cache-fix-snapshots/<session-hash>-last.json
+//
+// On first call after startup: compares against saved snapshot and writes
+// a diff report to ~/.claude/cache-fix-snapshots/<session-hash>-diff.json
+// --------------------------------------------------------------------------
+
+let _prefixDiffFirstCall = true;
+
+// --------------------------------------------------------------------------
+// GrowthBook flag dump (runs once on first API call)
+// --------------------------------------------------------------------------
+
+let _growthBookDumped = false;
+
+function dumpGrowthBookFlags() {
+  if (_growthBookDumped || !DEBUG) return;
+  _growthBookDumped = true;
+  try {
+    const claudeJson = JSON.parse(readFileSync(join(homedir(), ".claude.json"), "utf8"));
+    const features = claudeJson.cachedGrowthBookFeatures;
+    if (!features) { debugLog("GROWTHBOOK: no cachedGrowthBookFeatures found"); return; }
+
+    // Log the flags that matter for cost/cache/context behavior
+    const interesting = {
+      hawthorn_window: features.tengu_hawthorn_window,
+      pewter_kestrel: features.tengu_pewter_kestrel,
+      summarize_tool_results: features.tengu_summarize_tool_results,
+      slate_heron: features.tengu_slate_heron,
+      session_memory: features.tengu_session_memory,
+      sm_compact: features.tengu_sm_compact,
+      sm_compact_config: features.tengu_sm_compact_config,
+      sm_config: features.tengu_sm_config,
+      cache_plum_violet: features.tengu_cache_plum_violet,
+      prompt_cache_1h_config: features.tengu_prompt_cache_1h_config,
+      crystal_beam: features.tengu_crystal_beam,
+      cold_compact: features.tengu_cold_compact,
+      system_prompt_global_cache: features.tengu_system_prompt_global_cache,
+      compact_cache_prefix: features.tengu_compact_cache_prefix,
+    };
+    debugLog("GROWTHBOOK FLAGS:", JSON.stringify(interesting, null, 2));
+  } catch (e) {
+    debugLog("GROWTHBOOK: failed to read ~/.claude.json:", e?.message);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Microcompact / budget monitoring
+// --------------------------------------------------------------------------
+
+/**
+ * Scan outgoing messages for signs of microcompact clearing and budget
+ * enforcement. Counts tool results that have been gutted and reports stats.
+ */
+function monitorContextDegradation(messages) {
+  if (!Array.isArray(messages)) return null;
+
+  let clearedToolResults = 0;
+  let totalToolResultChars = 0;
+  let totalToolResults = 0;
+
+  for (const msg of messages) {
+    if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+    for (const block of msg.content) {
+      if (block.type === "tool_result") {
+        totalToolResults++;
+        const content = block.content;
+        if (typeof content === "string") {
+          if (content === "[Old tool result content cleared]") {
+            clearedToolResults++;
+          } else {
+            totalToolResultChars += content.length;
+          }
+        } else if (Array.isArray(content)) {
+          for (const item of content) {
+            if (item.type === "text") {
+              if (item.text === "[Old tool result content cleared]") {
+                clearedToolResults++;
+              } else {
+                totalToolResultChars += item.text.length;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (totalToolResults === 0) return null;
+
+  const stats = { totalToolResults, clearedToolResults, totalToolResultChars };
+
+  if (clearedToolResults > 0) {
+    debugLog(`MICROCOMPACT: ${clearedToolResults}/${totalToolResults} tool results cleared`);
+  }
+
+  // Warn when approaching the 200K budget threshold
+  if (totalToolResultChars > 150000) {
+    debugLog(`BUDGET WARNING: tool result chars at ${totalToolResultChars.toLocaleString()} / 200,000 threshold`);
+  }
+
+  return stats;
+}
+
+function snapshotPrefix(payload) {
+  if (!PREFIXDIFF) return;
+  try {
+    mkdirSync(SNAPSHOT_DIR, { recursive: true });
+
+    // Session key: use system prompt hash — stable across restarts for the same project.
+    // Different projects get different snapshots, same project matches across resume.
+    const sessionKey = payload.system
+      ? createHash("sha256").update(JSON.stringify(payload.system).slice(0, 2000)).digest("hex").slice(0, 12)
+      : "default";
+
+    const snapshotFile = join(SNAPSHOT_DIR, `${sessionKey}-last.json`);
+    const diffFile = join(SNAPSHOT_DIR, `${sessionKey}-diff.json`);
+
+    // Build prefix snapshot: first 5 messages, stripped of cache_control
+    const prefixMsgs = (payload.messages || []).slice(0, 5).map(msg => {
+      const content = Array.isArray(msg.content)
+        ? msg.content.map(b => {
+            const { cache_control, ...rest } = b;
+            // Truncate long text blocks for diffing
+            if (rest.text && rest.text.length > 500) {
+              rest.text = rest.text.slice(0, 500) + `...[${rest.text.length} chars]`;
+            }
+            return rest;
+          })
+        : msg.content;
+      return { role: msg.role, content };
+    });
+
+    const toolsHash = payload.tools
+      ? createHash("sha256").update(JSON.stringify(payload.tools.map(t => t.name))).digest("hex").slice(0, 16)
+      : "none";
+
+    const systemHash = payload.system
+      ? createHash("sha256").update(JSON.stringify(payload.system)).digest("hex").slice(0, 16)
+      : "none";
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      messageCount: payload.messages?.length || 0,
+      toolsHash,
+      systemHash,
+      prefixMessages: prefixMsgs,
+    };
+
+    // On first call: compare against saved
+    if (_prefixDiffFirstCall) {
+      _prefixDiffFirstCall = false;
+      try {
+        const prev = JSON.parse(readFileSync(snapshotFile, "utf8"));
+        const diff = {
+          timestamp: snapshot.timestamp,
+          prevTimestamp: prev.timestamp,
+          toolsMatch: prev.toolsHash === snapshot.toolsHash,
+          systemMatch: prev.systemHash === snapshot.systemHash,
+          messageCountPrev: prev.messageCount,
+          messageCountNow: snapshot.messageCount,
+          prefixDiffs: [],
+        };
+
+        const maxIdx = Math.max(prev.prefixMessages.length, snapshot.prefixMessages.length);
+        for (let i = 0; i < maxIdx; i++) {
+          const prevMsg = JSON.stringify(prev.prefixMessages[i] || null);
+          const nowMsg = JSON.stringify(snapshot.prefixMessages[i] || null);
+          if (prevMsg !== nowMsg) {
+            diff.prefixDiffs.push({
+              index: i,
+              prev: prev.prefixMessages[i] || null,
+              now: snapshot.prefixMessages[i] || null,
+            });
+          }
+        }
+
+        writeFileSync(diffFile, JSON.stringify(diff, null, 2));
+        debugLog(`PREFIX DIFF: ${diff.prefixDiffs.length} differences in first 5 messages. tools=${diff.toolsMatch ? "match" : "DIFFER"} system=${diff.systemMatch ? "match" : "DIFFER"}`);
+      } catch {
+        // No previous snapshot — first run
+      }
+    }
+
+    // Save current snapshot
+    writeFileSync(snapshotFile, JSON.stringify(snapshot, null, 2));
+  } catch (e) {
+    debugLog("PREFIX SNAPSHOT ERROR:", e?.message);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Fetch interceptor
+// --------------------------------------------------------------------------
 
 const _origFetch = globalThis.fetch;
 
@@ -339,23 +615,27 @@ globalThis.fetch = async function (url, options) {
     !urlStr.includes("batches") &&
     !urlStr.includes("count_tokens");
 
-  if (
-    isMessagesEndpoint &&
-    options?.body &&
-    typeof options.body === "string"
-  ) {
+  if (isMessagesEndpoint && options?.body && typeof options.body === "string") {
     try {
       const payload = JSON.parse(options.body);
       let modified = false;
 
+      // One-time GrowthBook flag dump on first API call
+      dumpGrowthBookFlags();
+
       debugLog("--- API call to", urlStr);
       debugLog("message count:", payload.messages?.length);
 
-      // Bug 1: Relocate scattered attachment blocks
+      // Detect synthetic model (false rate limiter, B3)
+      if (payload.model === "<synthetic>") {
+        debugLog("FALSE RATE LIMIT: synthetic model detected — client-side rate limit, no real API call");
+      }
+
+      // Bug 1: Relocate resume attachment blocks
       if (payload.messages) {
+        // Log message structure for debugging
         if (DEBUG) {
-          let firstUserIdx = -1;
-          let lastUserIdx = -1;
+          let firstUserIdx = -1, lastUserIdx = -1;
           for (let i = 0; i < payload.messages.length; i++) {
             if (payload.messages[i].role === "user") {
               if (firstUserIdx === -1) firstUserIdx = i;
@@ -365,39 +645,20 @@ globalThis.fetch = async function (url, options) {
           if (firstUserIdx !== -1) {
             const firstContent = payload.messages[firstUserIdx].content;
             const lastContent = payload.messages[lastUserIdx].content;
-            debugLog(
-              "firstUserIdx:",
-              firstUserIdx,
-              "lastUserIdx:",
-              lastUserIdx
-            );
-            debugLog(
-              "first user msg blocks:",
-              Array.isArray(firstContent) ? firstContent.length : "string"
-            );
+            debugLog("firstUserIdx:", firstUserIdx, "lastUserIdx:", lastUserIdx);
+            debugLog("first user msg blocks:", Array.isArray(firstContent) ? firstContent.length : "string");
             if (Array.isArray(firstContent)) {
               for (const b of firstContent) {
                 const t = (b.text || "").substring(0, 80);
-                debugLog(
-                  "  first[block]:",
-                  isRelocatableBlock(b.text) ? "RELOCATABLE" : "keep",
-                  JSON.stringify(t)
-                );
+                debugLog("  first[block]:", isRelocatableBlock(b.text) ? "RELOCATABLE" : "keep", JSON.stringify(t));
               }
             }
             if (firstUserIdx !== lastUserIdx) {
-              debugLog(
-                "last user msg blocks:",
-                Array.isArray(lastContent) ? lastContent.length : "string"
-              );
+              debugLog("last user msg blocks:", Array.isArray(lastContent) ? lastContent.length : "string");
               if (Array.isArray(lastContent)) {
                 for (const b of lastContent) {
                   const t = (b.text || "").substring(0, 80);
-                  debugLog(
-                    "  last[block]:",
-                    isRelocatableBlock(b.text) ? "RELOCATABLE" : "keep",
-                    JSON.stringify(t)
-                  );
+                  debugLog("  last[block]:", isRelocatableBlock(b.text) ? "RELOCATABLE" : "keep", JSON.stringify(t));
                 }
               }
             } else {
@@ -412,13 +673,28 @@ globalThis.fetch = async function (url, options) {
           modified = true;
           debugLog("APPLIED: resume message relocation");
         } else {
-          debugLog(
-            "SKIPPED: resume relocation (not a resume or already correct)"
-          );
+          debugLog("SKIPPED: resume relocation (not a resume or already correct)");
         }
       }
 
-      // Bug 3: Stabilize tool ordering
+      // Image stripping: remove old tool_result images to reduce token waste
+      if (payload.messages && IMAGE_KEEP_LAST > 0) {
+        const { messages: imgStripped, stats: imgStats } = stripOldToolResultImages(
+          payload.messages, IMAGE_KEEP_LAST
+        );
+        if (imgStats) {
+          payload.messages = imgStripped;
+          modified = true;
+          debugLog(
+            `APPLIED: stripped ${imgStats.strippedCount} images from old tool results`,
+            `(~${imgStats.strippedBytes} base64 bytes, ~${imgStats.estimatedTokens} tokens saved)`
+          );
+        } else if (IMAGE_KEEP_LAST > 0) {
+          debugLog("SKIPPED: image stripping (no old images found or not enough turns)");
+        }
+      }
+
+      // Bug 2a: Stabilize tool ordering
       if (payload.tools) {
         const sorted = stabilizeToolOrder(payload.tools);
         const changed = sorted.some(
@@ -431,7 +707,7 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
-      // Bug 2: Stabilize fingerprint in attribution header
+      // Bug 2b: Stabilize fingerprint in attribution header
       if (payload.system && payload.messages) {
         const fix = stabilizeFingerprint(payload.system, payload.messages);
         if (fix) {
@@ -441,12 +717,7 @@ globalThis.fetch = async function (url, options) {
             text: fix.newText,
           };
           modified = true;
-          debugLog(
-            "APPLIED: fingerprint stabilized from",
-            fix.oldFingerprint,
-            "to",
-            fix.stableFingerprint
-          );
+          debugLog("APPLIED: fingerprint stabilized from", fix.oldFingerprint, "to", fix.stableFingerprint);
         }
       }
 
@@ -454,11 +725,48 @@ globalThis.fetch = async function (url, options) {
         options = { ...options, body: JSON.stringify(payload) };
         debugLog("Request body rewritten");
       }
+
+      // Monitor for microcompact / budget enforcement degradation
+      if (payload.messages) {
+        monitorContextDegradation(payload.messages);
+      }
+
+      // Capture prefix snapshot for cross-process diff analysis
+      snapshotPrefix(payload);
+
     } catch (e) {
       debugLog("ERROR in interceptor:", e?.message);
       // Parse failure — pass through unmodified
     }
   }
 
-  return _origFetch.apply(this, [url, options]);
+  const response = await _origFetch.apply(this, [url, options]);
+
+  // Extract quota utilization from response headers and save for hooks/MCP
+  if (isMessagesEndpoint) {
+    try {
+      const h5 = response.headers.get("anthropic-ratelimit-unified-5h-utilization");
+      const h7d = response.headers.get("anthropic-ratelimit-unified-7d-utilization");
+      const reset5h = response.headers.get("anthropic-ratelimit-unified-5h-reset");
+      const reset7d = response.headers.get("anthropic-ratelimit-unified-7d-reset");
+      const status = response.headers.get("anthropic-ratelimit-unified-status");
+      const overage = response.headers.get("anthropic-ratelimit-unified-overage-status");
+
+      if (h5 || h7d) {
+        const quota = {
+          timestamp: new Date().toISOString(),
+          five_hour: h5 ? { utilization: parseFloat(h5), pct: Math.round(parseFloat(h5) * 100), resets_at: reset5h ? parseInt(reset5h) : null } : null,
+          seven_day: h7d ? { utilization: parseFloat(h7d), pct: Math.round(parseFloat(h7d) * 100), resets_at: reset7d ? parseInt(reset7d) : null } : null,
+          status: status || null,
+          overage_status: overage || null,
+        };
+        const quotaFile = join(homedir(), ".claude", "quota-status.json");
+        writeFileSync(quotaFile, JSON.stringify(quota, null, 2));
+      }
+    } catch {
+      // Non-critical — don't break the response
+    }
+  }
+
+  return response;
 };
