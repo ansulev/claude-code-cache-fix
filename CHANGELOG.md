@@ -5,6 +5,7 @@
 New features:
 
 - **Image stripping from old tool results** — Base64 images from Read tool persist in conversation history and are sent on every subsequent API call (~62,500 tokens per 500KB image per turn). Set `CACHE_FIX_IMAGE_KEEP_LAST=N` to strip images from tool results older than N user turns. Only targets tool_result images; user-pasted images are preserved. (Default: 0 = disabled)
+- **Prefix lock for resume cache hit** — Saves messages[0] content after all fixes are applied; replays it on resume to produce a byte-identical prefix and avoid a full cache rebuild. Five safety guards prevent stale or incorrect prefix replay. Set `CACHE_FIX_PREFIX_LOCK=1` to enable. (Default: 0 = disabled)
 - **GrowthBook flag dump** — Logs cost/cache-relevant server-controlled flags (tengu_hawthorn_window, pewter_kestrel, slate_heron, etc.) from `~/.claude.json` on first API call when `CACHE_FIX_DEBUG=1`
 - **Microcompact monitoring** — Detects `[Old tool result content cleared]` markers in outgoing messages and logs count. Warns when total tool result chars approach the 200K budget threshold
 - **False rate limiter detection** — Logs when the client generates synthetic rate limit errors (`model: "<synthetic>"`) without making a real API call

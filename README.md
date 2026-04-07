@@ -92,6 +92,27 @@ This keeps images in the last 3 user messages and replaces older ones with a tex
 
 Set to `0` (default) to disable.
 
+## Prefix lock (resume cache hit)
+
+Even with the block relocation fix, the first API call after `--resume` triggers a full cache rebuild because CC reassembles messages with different system-reminder blocks, changing the prefix bytes. On a 300k token context at Opus rates, that's ~$2.80 per resume.
+
+The prefix lock eliminates this by saving the exact `messages[0]` content after all fixes are applied, then replaying it on the next resume to produce a byte-identical prefix.
+
+```bash
+export CACHE_FIX_PREFIX_LOCK=1
+```
+
+Safety guards — the lock only fires when ALL of these match:
+- System prompt hash (same project, no CLAUDE.md changes)
+- Tools hash (no MCP/plugin changes)
+- User message text (same conversation)
+- User content hash (no substantive context changes)
+- Not a post-compaction conversation
+
+If any guard fails, the lock skips and falls back to normal behavior. The worst case is a skip — the lock cannot increase costs or cause context loss.
+
+Set to `0` (default) to disable.
+
 ## Monitoring
 
 The interceptor includes monitoring for several additional issues identified by the community:
@@ -131,6 +152,8 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `BUDGET WARNING: tool result chars at N / 200,000 threshold` — approaching budget cap
 - `FALSE RATE LIMIT: synthetic model detected` — client-side false rate limit
 - `GROWTHBOOK FLAGS: {...}` — server-controlled feature flags on first call
+- `PREFIX LOCK: APPLIED — replayed saved messages[0]` — resume cache hit achieved
+- `PREFIX LOCK: skipped — <reason>` — guard prevented lock (expected, safe)
 - `SKIPPED: resume relocation (not a resume or already correct)` — no fix needed
 
 ### Prefix diff mode
@@ -150,6 +173,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 | `CACHE_FIX_DEBUG` | `0` | Enable debug logging to `~/.claude/cache-fix-debug.log` |
 | `CACHE_FIX_PREFIXDIFF` | `0` | Enable prefix snapshot diffing |
 | `CACHE_FIX_IMAGE_KEEP_LAST` | `0` | Keep images in last N user messages (0 = disabled) |
+| `CACHE_FIX_PREFIX_LOCK` | `0` | Replay saved messages[0] on resume for cache hit (0 = disabled) |
 
 ## Limitations
 
