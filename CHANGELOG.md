@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.0 (2026-04-08)
+
+- **TTL tier detection** — Clones the API response and drains the SSE stream to extract `ephemeral_1h_input_tokens` and `ephemeral_5m_input_tokens` from the usage object. Determines which cache TTL tier the server applied (1h vs 5m) and writes it to `~/.claude/quota-status.json` alongside quota data. Logs per-call cache hit rate and TTL tier when `CACHE_FIX_DEBUG=1`. Useful for diagnosing stuck TTL issues (#42052).
+- **Quota file merge** — Header-based quota writes now merge with existing `quota-status.json` instead of replacing it, preserving the async TTL/cache data across writes.
+
 ## 1.3.0 (2026-04-08)
 
 - **Prompt size measurement** — When `CACHE_FIX_DEBUG=1`, every API call now logs character counts for the system prompt, tool schemas, and per-type injected blocks (skills listing, MCP instructions, deferred tools, hooks). Helps users with large plugin/skill setups quantify the per-turn token cost of their configuration.

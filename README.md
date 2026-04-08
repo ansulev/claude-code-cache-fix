@@ -132,6 +132,7 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `FALSE RATE LIMIT: synthetic model detected` — client-side false rate limit
 - `GROWTHBOOK FLAGS: {...}` — server-controlled feature flags on first call
 - `PROMPT SIZE: system=N tools=N injected=N (skills=N mcp=N ...)` — per-call prompt size breakdown
+- `CACHE TTL: tier=1h create=N read=N hit=N% (1h=N 5m=N)` — TTL tier and cache hit rate per call
 - `SKIPPED: resume relocation (not a resume or already correct)` — no fix needed
 
 ### Prefix diff mode
