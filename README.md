@@ -114,6 +114,10 @@ On the first API call, the interceptor reads `~/.claude.json` and logs the curre
 
 Response headers are parsed for `anthropic-ratelimit-unified-5h-utilization` and `7d-utilization`, saved to `~/.claude/quota-status.json` for consumption by status line hooks or other tools.
 
+### Peak hour detection
+
+Anthropic applies elevated quota drain rates during weekday peak hours (13:00–19:00 UTC, Mon–Fri). The interceptor detects peak windows and writes `peak_hour: true/false` to `quota-status.json`. See `docs/peak-hours-reference.md` for sources and details.
+
 ## Debug mode
 
 Enable debug logging to verify the fix is working:
@@ -133,6 +137,7 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `GROWTHBOOK FLAGS: {...}` — server-controlled feature flags on first call
 - `PROMPT SIZE: system=N tools=N injected=N (skills=N mcp=N ...)` — per-call prompt size breakdown
 - `CACHE TTL: tier=1h create=N read=N hit=N% (1h=N 5m=N)` — TTL tier and cache hit rate per call
+- `PEAK HOUR: weekday 13:00-19:00 UTC` — Anthropic peak hour throttling active
 - `SKIPPED: resume relocation (not a resume or already correct)` — no fix needed
 
 ### Prefix diff mode

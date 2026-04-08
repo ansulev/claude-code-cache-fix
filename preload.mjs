@@ -792,7 +792,22 @@ globalThis.fetch = async function (url, options) {
         quota.seven_day = h7d ? { utilization: parseFloat(h7d), pct: Math.round(parseFloat(h7d) * 100), resets_at: reset7d ? parseInt(reset7d) : null } : quota.seven_day;
         quota.status = status || null;
         quota.overage_status = overage || null;
+
+        // Peak hour detection — Anthropic applies higher quota drain rate during
+        // weekday peak hours: 13:00–19:00 UTC (Mon–Fri).
+        // Source: Thariq (Anthropic) via X, 2026-03-26; confirmed by The Register,
+        // PCWorld, Piunikaweb. No specific multiplier disclosed.
+        const now = new Date();
+        const utcHour = now.getUTCHours();
+        const utcDay = now.getUTCDay(); // 0=Sun, 6=Sat
+        const isPeak = utcDay >= 1 && utcDay <= 5 && utcHour >= 13 && utcHour < 19;
+        quota.peak_hour = isPeak;
+
         writeFileSync(quotaFile, JSON.stringify(quota, null, 2));
+
+        if (DEBUG && isPeak) {
+          debugLog("PEAK HOUR: weekday 13:00-19:00 UTC — quota drains at elevated rate");
+        }
       }
     } catch {
       // Non-critical — don't break the response

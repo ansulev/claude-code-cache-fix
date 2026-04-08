@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 (2026-04-08)
+
+- **Peak hour detection** — Detects Anthropic's weekday peak hours (13:00–19:00 UTC, Mon–Fri) when quota drains at an elevated rate. Writes `peak_hour: true/false` to `quota-status.json` and logs `PEAK HOUR` when `CACHE_FIX_DEBUG=1`. Enables status line and data analysis to separate peak vs off-peak burn rates.
+
 ## 1.4.0 (2026-04-08)
 
 - **TTL tier detection** — Clones the API response and drains the SSE stream to extract `ephemeral_1h_input_tokens` and `ephemeral_5m_input_tokens` from the usage object. Determines which cache TTL tier the server applied (1h vs 5m) and writes it to `~/.claude/quota-status.json` alongside quota data. Logs per-call cache hit rate and TTL tier when `CACHE_FIX_DEBUG=1`. Useful for diagnosing stuck TTL issues (#42052).
