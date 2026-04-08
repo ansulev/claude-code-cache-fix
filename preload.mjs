@@ -784,20 +784,126 @@ globalThis.fetch = async function (url, options) {
       const overage = response.headers.get("anthropic-ratelimit-unified-overage-status");
 
       if (h5 || h7d) {
-        const quota = {
-          timestamp: new Date().toISOString(),
-          five_hour: h5 ? { utilization: parseFloat(h5), pct: Math.round(parseFloat(h5) * 100), resets_at: reset5h ? parseInt(reset5h) : null } : null,
-          seven_day: h7d ? { utilization: parseFloat(h7d), pct: Math.round(parseFloat(h7d) * 100), resets_at: reset7d ? parseInt(reset7d) : null } : null,
-          status: status || null,
-          overage_status: overage || null,
-        };
         const quotaFile = join(homedir(), ".claude", "quota-status.json");
+        let quota = {};
+        try { quota = JSON.parse(readFileSync(quotaFile, "utf8")); } catch {}
+        quota.timestamp = new Date().toISOString();
+        quota.five_hour = h5 ? { utilization: parseFloat(h5), pct: Math.round(parseFloat(h5) * 100), resets_at: reset5h ? parseInt(reset5h) : null } : quota.five_hour;
+        quota.seven_day = h7d ? { utilization: parseFloat(h7d), pct: Math.round(parseFloat(h7d) * 100), resets_at: reset7d ? parseInt(reset7d) : null } : quota.seven_day;
+        quota.status = status || null;
+        quota.overage_status = overage || null;
         writeFileSync(quotaFile, JSON.stringify(quota, null, 2));
       }
     } catch {
       // Non-critical — don't break the response
     }
+
+    // Clone response to extract TTL tier from usage (SSE stream)
+    try {
+      const clone = response.clone();
+      drainTTLFromClone(clone).catch(() => {});
+    } catch {
+      // clone() failure is non-fatal
+    }
   }
 
   return response;
 };
+
+// --------------------------------------------------------------------------
+// TTL tier extraction from SSE response stream
+// --------------------------------------------------------------------------
+
+/**
+ * Drain a cloned SSE response to extract cache TTL tier from the usage object.
+ * The message_start event contains usage.cache_creation with ephemeral_1h and
+ * ephemeral_5m token counts, revealing which TTL tier the server applied.
+ *
+ * Writes TTL tier to ~/.claude/quota-status.json (merges with existing data)
+ * and logs to debug log.
+ */
+async function drainTTLFromClone(clone) {
+  if (!clone.body) return;
+
+  const reader = clone.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+
+        if (!line.startsWith("data: ") || line === "data: [DONE]") continue;
+
+        try {
+          const event = JSON.parse(line.slice(6));
+
+          if (event.type === "message_start" && event.message?.usage) {
+            const u = event.message.usage;
+            const cc = u.cache_creation || {};
+            const e1h = cc.ephemeral_1h_input_tokens ?? 0;
+            const e5m = cc.ephemeral_5m_input_tokens ?? 0;
+            const cacheCreate = u.cache_creation_input_tokens ?? 0;
+            const cacheRead = u.cache_read_input_tokens ?? 0;
+
+            // Determine TTL tier from which ephemeral bucket got tokens
+            // When cache is fully warm (no creation), infer tier from previous
+            let ttlTier = "unknown";
+            if (e1h > 0 && e5m === 0) ttlTier = "1h";
+            else if (e5m > 0 && e1h === 0) ttlTier = "5m";
+            else if (e1h === 0 && e5m === 0 && cacheCreate === 0) {
+              // Fully cached — no creation to determine tier. Preserve previous.
+              try {
+                const prev = JSON.parse(readFileSync(join(homedir(), ".claude", "quota-status.json"), "utf8"));
+                ttlTier = prev.cache?.ttl_tier || "1h";
+              } catch { ttlTier = "1h"; }
+            }
+            else if (e1h > 0 && e5m > 0) ttlTier = "mixed";
+
+            const hitRate = (cacheRead + cacheCreate) > 0
+              ? (cacheRead / (cacheRead + cacheCreate) * 100).toFixed(1)
+              : "N/A";
+
+            debugLog(
+              `CACHE TTL: tier=${ttlTier}`,
+              `create=${cacheCreate} read=${cacheRead} hit=${hitRate}%`,
+              `(1h=${e1h} 5m=${e5m})`
+            );
+
+            // Merge TTL data into quota-status.json
+            try {
+              const quotaFile = join(homedir(), ".claude", "quota-status.json");
+              let quota = {};
+              try { quota = JSON.parse(readFileSync(quotaFile, "utf8")); } catch {}
+              quota.cache = {
+                ttl_tier: ttlTier,
+                cache_creation: cacheCreate,
+                cache_read: cacheRead,
+                ephemeral_1h: e1h,
+                ephemeral_5m: e5m,
+                hit_rate: hitRate,
+                timestamp: new Date().toISOString(),
+              };
+              writeFileSync(quotaFile, JSON.stringify(quota, null, 2));
+            } catch {}
+
+            // Got what we need — stop reading
+            reader.cancel();
+            return;
+          }
+        } catch {
+          // Skip malformed SSE lines
+        }
+      }
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+}
