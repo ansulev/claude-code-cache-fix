@@ -131,6 +131,7 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `BUDGET WARNING: tool result chars at N / 200,000 threshold` — approaching budget cap
 - `FALSE RATE LIMIT: synthetic model detected` — client-side false rate limit
 - `GROWTHBOOK FLAGS: {...}` — server-controlled feature flags on first call
+- `PROMPT SIZE: system=N tools=N injected=N (skills=N mcp=N ...)` — per-call prompt size breakdown
 - `SKIPPED: resume relocation (not a resume or already correct)` — no fix needed
 
 ### Prefix diff mode

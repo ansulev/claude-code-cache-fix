@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.0 (2026-04-08)
+
+- **Prompt size measurement** — When `CACHE_FIX_DEBUG=1`, every API call now logs character counts for the system prompt, tool schemas, and per-type injected blocks (skills listing, MCP instructions, deferred tools, hooks). Helps users with large plugin/skill setups quantify the per-turn token cost of their configuration.
+- **Removed prefix lock feature** — The prefix lock (`CACHE_FIX_PREFIX_LOCK`) has been removed. Testing revealed that the system prompt includes dynamic content (gitStatus, session-specific data) that changes on every resume, making the lock unable to match in practice. The `CACHE_FIX_PREFIX_LOCK` env var is now ignored.
+- **Confirmed on v2.1.96** — Tested and verified against Claude Code v2.1.96.
+
 ## 1.2.1 (2026-04-08)
 
 - **Removed prefix lock feature** — The prefix lock (`CACHE_FIX_PREFIX_LOCK`) has been removed. Testing revealed that the system prompt includes dynamic content (gitStatus, session-specific data) that changes on every resume, making the lock unable to match in practice. The feature never successfully fired in real cross-session usage. The `CACHE_FIX_PREFIX_LOCK` env var is now ignored.
