@@ -731,6 +731,37 @@ globalThis.fetch = async function (url, options) {
         monitorContextDegradation(payload.messages);
       }
 
+      // Prompt size measurement — log system prompt, tools, and injected block sizes
+      if (DEBUG && payload.system && payload.tools && payload.messages) {
+        const sysChars = JSON.stringify(payload.system).length;
+        const toolsChars = JSON.stringify(payload.tools).length;
+        const firstUserIdx = payload.messages.findIndex(m => m.role === "user");
+        if (firstUserIdx !== -1) {
+          const msg0 = payload.messages[firstUserIdx];
+          if (Array.isArray(msg0.content)) {
+            let skillsChars = 0;
+            let mcpChars = 0;
+            let deferredChars = 0;
+            let hooksChars = 0;
+            for (const block of msg0.content) {
+              const text = block.text || "";
+              if (isSkillsBlock(text)) skillsChars += text.length;
+              else if (isMcpBlock(text)) mcpChars += text.length;
+              else if (isDeferredToolsBlock(text)) deferredChars += text.length;
+              else if (isHooksBlock(text)) hooksChars += text.length;
+            }
+            const injectedTotal = skillsChars + mcpChars + deferredChars + hooksChars;
+            if (injectedTotal > 0) {
+              debugLog(
+                `PROMPT SIZE: system=${sysChars} tools=${toolsChars}`,
+                `injected=${injectedTotal} (skills=${skillsChars} mcp=${mcpChars}`,
+                `deferred=${deferredChars} hooks=${hooksChars})`
+              );
+            }
+          }
+        }
+      }
+
       // Capture prefix snapshot for cross-process diff analysis
       snapshotPrefix(payload);
 
