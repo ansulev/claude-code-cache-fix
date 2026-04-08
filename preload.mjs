@@ -366,156 +366,6 @@ function stripOldToolResultImages(messages, keepLast) {
 }
 
 // --------------------------------------------------------------------------
-// Prefix lock — replay saved messages[0] on resume for cache hit
-// --------------------------------------------------------------------------
-
-// CACHE_FIX_PREFIX_LOCK=1 — save messages[0] on every call and replay it on
-// resume to avoid a cache rebuild. Disabled by default.
-//
-// On resume, CC reassembles messages with blocks in different positions and
-// injects fresh system-reminders, changing the prefix bytes. Even after our
-// relocation fix corrects the blocks, the prefix differs from what the server
-// cached on the last pre-exit call, causing a full cache rebuild.
-//
-// This feature saves the exact messages[0] content after all fixes are applied.
-// On the first call of a new process (resume), if system prompt hash and tools
-// hash match the saved snapshot, and the real user message text matches, we
-// replay the saved messages[0] to produce a byte-identical prefix → cache hit.
-
-const PREFIX_LOCK = process.env.CACHE_FIX_PREFIX_LOCK === "1";
-const PREFIX_LOCK_FILE = join(homedir(), ".claude", "cache-fix-prefix-lock.json");
-
-let _prefixLockFirstCall = true;
-
-/**
- * Compute hashes for prefix lock comparison.
- */
-function computePrefixHashes(system, tools) {
-  const sysHash = system
-    ? createHash("sha256").update(JSON.stringify(system)).digest("hex").slice(0, 16)
-    : "none";
-  const toolHash = tools
-    ? createHash("sha256").update(JSON.stringify(tools.map(t => t.name).sort())).digest("hex").slice(0, 16)
-    : "none";
-  return { sysHash, toolHash };
-}
-
-/**
- * Extract the real user message text from messages[0] (skipping system-reminders).
- */
-function extractUserTextFromFirstMsg(msg) {
-  if (!msg || !Array.isArray(msg.content)) return "";
-  for (const block of msg.content) {
-    if (block.type === "text" && typeof block.text === "string" &&
-        !block.text.startsWith("<system-reminder>") &&
-        !block.text.startsWith("<local-command")) {
-      return block.text.slice(0, 200); // enough to identify, not too much to compare
-    }
-  }
-  return "";
-}
-
-/**
- * Hash all non-system-reminder user content in messages[0] to detect
- * substantive changes that the userText check (first 200 chars) might miss.
- */
-function hashUserContent(msg) {
-  if (!msg || !Array.isArray(msg.content)) return "empty";
-  const userBlocks = msg.content.filter(b =>
-    b.type === "text" && typeof b.text === "string" &&
-    !b.text.startsWith("<system-reminder>") &&
-    !b.text.startsWith("<local-command")
-  );
-  if (userBlocks.length === 0) return "empty";
-  return createHash("sha256")
-    .update(userBlocks.map(b => b.text).join("\n"))
-    .digest("hex").slice(0, 16);
-}
-
-/**
- * On resume: try to replay saved messages[0] for cache hit.
- * Returns the locked messages array or the original if lock doesn't apply.
- */
-function applyPrefixLock(messages, system, tools) {
-  if (!PREFIX_LOCK || !Array.isArray(messages) || messages.length < 2) return messages;
-
-  const firstUserIdx = messages.findIndex(m => m.role === "user");
-  if (firstUserIdx === -1) return messages;
-
-  const { sysHash, toolHash } = computePrefixHashes(system, tools);
-  const currentUserText = extractUserTextFromFirstMsg(messages[firstUserIdx]);
-  const currentContentHash = hashUserContent(messages[firstUserIdx]);
-
-  // Skip if this looks like a compacted conversation (system-reminder as first block
-  // with compaction summary markers)
-  const firstBlock = messages[firstUserIdx]?.content?.[0];
-  if (firstBlock?.text?.includes("CompactBoundary") || firstBlock?.text?.includes("compacted")) {
-    debugLog("PREFIX LOCK: skipped — compacted conversation detected");
-    return messages;
-  }
-
-  if (_prefixLockFirstCall) {
-    _prefixLockFirstCall = false;
-
-    // Try to load and apply saved prefix
-    try {
-      const saved = JSON.parse(readFileSync(PREFIX_LOCK_FILE, "utf8"));
-
-      if (saved.sysHash !== sysHash) {
-        debugLog("PREFIX LOCK: skipped — system prompt changed");
-      } else if (saved.toolHash !== toolHash) {
-        debugLog("PREFIX LOCK: skipped — tools changed");
-      } else if (saved.userText !== currentUserText) {
-        debugLog("PREFIX LOCK: skipped — user message text changed");
-      } else if (saved.contentHash && saved.contentHash !== currentContentHash) {
-        debugLog("PREFIX LOCK: skipped — user content hash changed (substantive context change)");
-      } else if (!saved.content || !Array.isArray(saved.content)) {
-        debugLog("PREFIX LOCK: skipped — saved content invalid");
-      } else {
-        // Apply the saved messages[0] content
-        const result = [...messages];
-        result[firstUserIdx] = { ...result[firstUserIdx], content: saved.content };
-        debugLog(`PREFIX LOCK: APPLIED — replayed saved messages[0] (${saved.content.length} blocks)`);
-        return result;
-      }
-    } catch {
-      debugLog("PREFIX LOCK: no saved prefix found (first run or file missing)");
-    }
-  }
-
-  return messages;
-}
-
-/**
- * Save current messages[0] content for future resume replay.
- * Called after all fixes are applied, before the request is sent.
- */
-function savePrefixLock(messages, system, tools) {
-  if (!PREFIX_LOCK || !Array.isArray(messages)) return;
-
-  const firstUserIdx = messages.findIndex(m => m.role === "user");
-  if (firstUserIdx === -1) return;
-
-  const { sysHash, toolHash } = computePrefixHashes(system, tools);
-  const userText = extractUserTextFromFirstMsg(messages[firstUserIdx]);
-  const contentHash = hashUserContent(messages[firstUserIdx]);
-  const content = messages[firstUserIdx].content;
-
-  try {
-    writeFileSync(PREFIX_LOCK_FILE, JSON.stringify({
-      timestamp: new Date().toISOString(),
-      sysHash,
-      toolHash,
-      userText,
-      contentHash,
-      content,
-    }));
-  } catch (e) {
-    debugLog("PREFIX LOCK: failed to save:", e?.message);
-  }
-}
-
-// --------------------------------------------------------------------------
 // Tool schema stabilization (Bug 2 secondary cause)
 // --------------------------------------------------------------------------
 
@@ -844,15 +694,6 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
-      // Prefix lock: replay saved messages[0] on resume for cache hit
-      if (payload.messages && payload.system) {
-        const locked = applyPrefixLock(payload.messages, payload.system, payload.tools);
-        if (locked !== payload.messages) {
-          payload.messages = locked;
-          modified = true;
-        }
-      }
-
       // Bug 2a: Stabilize tool ordering
       if (payload.tools) {
         const sorted = stabilizeToolOrder(payload.tools);
@@ -883,11 +724,6 @@ globalThis.fetch = async function (url, options) {
       if (modified) {
         options = { ...options, body: JSON.stringify(payload) };
         debugLog("Request body rewritten");
-      }
-
-      // Save prefix lock after all fixes applied
-      if (payload.messages && payload.system) {
-        savePrefixLock(payload.messages, payload.system, payload.tools);
       }
 
       // Monitor for microcompact / budget enforcement degradation
