@@ -21,15 +21,17 @@ Last updated: 2026-04-08
 | [#42052](https://github.com/anthropics/claude-code/issues/42052) | Max 20x plan: 100% usage after 2 hours | Open | Bidirectional TTL data, overage mechanism analysis. TigerKay1926 has contradicting data (stuck 5m TTL). |
 | [#42260](https://github.com/anthropics/claude-code/issues/42260) | Resume loads disproportionate tokens from thinking signatures | Open | Posted analysis of opaque thinking token overhead. |
 | [#27048](https://github.com/anthropics/claude-code/issues/27048) | Prompt cache invalidation on resume: plugin state changes | Open | Posted interceptor as solution, replied to thoeltig re: plugin registration logic (2026-04-08). |
+| [#44045](https://github.com/anthropics/claude-code/issues/44045) | Prompt cache partial miss on every --resume turn | Open | Posted interceptor data, confirmed skill_listing block scatter. Linked normalizeResumeMessages code. (2026-04-08) |
+| [#44724](https://github.com/anthropics/claude-code/issues/44724) | Subagent cache miss on first SendMessage resume | Open | Posted analysis — cache_read=0 suggests system prompt differs between Agent and SendMessage, not just block scatter. Asked for mitmproxy diff. (2026-04-08) |
+| [#42542](https://github.com/anthropics/claude-code/issues/42542) | Silent context degradation — microcompact, cached microcompact, session memory compact | Open | Posted interceptor monitoring data — 0 microcompact events in 4,700+ calls, 84 budget warnings, confirmed no DISABLE_MICROCOMPACT. (2026-04-08) |
+| [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | Posted comparison data — no growth on minimal setup between v2.1.92 and v2.1.96; growth is plugin-amplified. Added prompt size measurement feature. (2026-04-08) |
+| [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes — 52-73% block scatter, 98% tool reorder, image carry-forward, TTL downgrade. (2026-04-08) |
+| [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
 
 ## Monitoring — Directly relevant
 
 | # | Title | State | Why it matters | Fresh activity |
 |---|-------|-------|---------------|----------------|
-| [#44045](https://github.com/anthropics/claude-code/issues/44045) | Prompt cache partial miss on every --resume turn | Open | Exact bug our interceptor fixes (skill_listing block missing from messages[0]). SDK-level repro with token measurements. | 2026-04-08 |
-| [#44724](https://github.com/anthropics/claude-code/issues/44724) | Subagent cache miss on first SendMessage resume | Open | Same root cause but for subagents/SendMessage. May need interceptor extension. | 2026-04-08 |
-| [#42542](https://github.com/anthropics/claude-code/issues/42542) | Silent context degradation — microcompact, cached microcompact, session memory compact | Open | Documents 3 context clearing mechanisms. Aligns with our microcompact monitoring. 20 comments, active thread. | 2026-04-08 |
-| [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | System prompt bloat directly impacts cache cost. May explain rising quota burn rates. | 2026-04-08 |
 | [#43044](https://github.com/anthropics/claude-code/issues/43044) | --resume loads 0% context on v2.1.91 | Open | Three regressions in session loading pipeline, source-code verified. Listed in our README. | 2026-04-04 |
 | [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | Open | Confirms resume cache invalidation on v2.1.92. Listed in our README. | 2026-04-04 |
 
@@ -74,10 +76,5 @@ Last updated: 2026-04-08
 
 ## Issues needing our attention
 
-### Should comment on (have relevant data):
-- **#44045** — Our interceptor directly fixes the skill_listing bug they describe. Should post.
-- **#44724** — Subagent variant of the same bug. Worth investigating if our interceptor helps.
-- **#42542** — Our microcompact monitoring detects exactly what they document. Could share findings.
-
-### Should investigate:
-- **#45188** — System prompt grew 70K tokens? If true, this directly impacts our cache costs. Need to verify against our own system prompt data.
+### Completed (2026-04-08)
+All previously flagged issues have been engaged. No outstanding items.
