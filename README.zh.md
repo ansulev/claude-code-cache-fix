@@ -2,7 +2,7 @@
 
 [English](./README.md) | 中文
 
-修复 [Claude Code](https://github.com/anthropics/claude-code) 中导致恢复会话时**成本增加高达 20 倍**的提示缓存回归问题，同时监控静默上下文降级。已在 v2.1.92 至 v2.1.96 上验证。
+修复 [Claude Code](https://github.com/anthropics/claude-code) 中导致恢复会话时**成本增加高达 20 倍**的提示缓存回归问题，同时监控静默上下文降级。已在 v2.1.92 至 v2.1.97 上验证。
 
 ## 问题描述
 

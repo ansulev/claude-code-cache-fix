@@ -18,21 +18,21 @@ Last updated: 2026-04-09
 |---|-------|-------|-----------------|
 | [#34629](https://github.com/anthropics/claude-code/issues/34629) | Prompt cache regression in --resume (~20x cost) | Closed | Root cause analysis, interceptor fix. Original bug that started this work. |
 | [#40524](https://github.com/anthropics/claude-code/issues/40524) | Conversation history invalidated on subsequent turns | Closed | Image persistence discovery, fingerprint analysis, Renvect collaboration. Multiple posts. |
-| [#42052](https://github.com/anthropics/claude-code/issues/42052) | Max 20x plan: 100% usage after 2 hours | Open | Bidirectional TTL data, overage mechanism analysis. TigerKay1926 has contradicting data (stuck 5m TTL). |
+| [#42052](https://github.com/anthropics/claude-code/issues/42052) | Max 20x plan: 100% usage after 2 hours | Open | Bidirectional TTL data, overage mechanism analysis. TigerKay1926 has contradicting data (stuck 5m TTL). Vergil824 confirmed npm vs standalone cache difference, shared 1h cache patch — pointed to our interceptor (2026-04-09). |
 | [#42260](https://github.com/anthropics/claude-code/issues/42260) | Resume loads disproportionate tokens from thinking signatures | Open | Posted analysis of opaque thinking token overhead. |
 | [#27048](https://github.com/anthropics/claude-code/issues/27048) | Prompt cache invalidation on resume: plugin state changes | Open | Posted interceptor as solution, replied to thoeltig re: plugin registration logic (2026-04-08). |
 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | Prompt cache partial miss on every --resume turn | Open | Posted interceptor data, confirmed skill_listing block scatter (2026-04-08). bilby91 tested interceptor — 1h TTL works, found 1-char tool diff in Agent SDK. Asked for details (2026-04-09). |
 | [#44724](https://github.com/anthropics/claude-code/issues/44724) | Subagent cache miss on first SendMessage resume | Open | Posted analysis — cache_read=0 suggests system prompt differs between Agent and SendMessage, not just block scatter. Asked for mitmproxy diff. (2026-04-08) |
 | [#42542](https://github.com/anthropics/claude-code/issues/42542) | Silent context degradation — microcompact, cached microcompact, session memory compact | Open | Posted interceptor monitoring data — 0 microcompact events in 4,700+ calls, 84 budget warnings, confirmed no DISABLE_MICROCOMPACT. (2026-04-08) |
 | [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | Posted comparison data — no growth on minimal setup between v2.1.92 and v2.1.96; growth is plugin-amplified. Added prompt size measurement feature. (2026-04-08) |
-| [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes (2026-04-08). Source code analysis of "API Usage Billing" header — fallback label when OAuth subscriber check fails, not a new billing mode (2026-04-09). |
+| [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes (2026-04-08). Source code analysis of "API Usage Billing" header, auth fallback vs token behavior (2026-04-09). Replied to marcuspuchalla (tool search) and Adanielyan92 (interceptor) (2026-04-09). |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
 
 ## Monitoring — Directly relevant
 
 | # | Title | State | Why it matters | Fresh activity |
 |---|-------|-------|---------------|----------------|
-| [#43044](https://github.com/anthropics/claude-code/issues/43044) | --resume loads 0% context on v2.1.91 | Open | Three regressions in session loading pipeline, source-code verified. Listed in our README. | 2026-04-04 |
+| [#43044](https://github.com/anthropics/claude-code/issues/43044) | --resume loads 0% context on v2.1.91 | **Closed** | Three regressions in session loading pipeline, source-code verified. Listed in our README. **Silently closed by Anthropic with no comment (2026-04-09).** ArkNill flagged it. | 2026-04-09 |
 | [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | Open | Confirms resume cache invalidation on v2.1.92. Listed in our README. | 2026-04-04 |
 
 ## Monitoring — Related (quota/cost/context)
@@ -72,6 +72,9 @@ Last updated: 2026-04-09
 | @Sn3th | Comprehensive microcompact/context degradation documentation (#42542). Three clearing mechanisms identified. |
 | @kolkov | Source-code verified analysis of 3 regressions in session loading pipeline (#43044). |
 | @labzink | Subagent/SendMessage cache miss discovery (#44724). |
+| @Vergil824 | Independent npm vs standalone cache confirmation, 1h cache enforcement patch (#42052). |
+| @marcuspuchalla | Reported enable_tool_search improvement on v2.1.74 (#41930). |
+| @Adanielyan92 | v2.1.96 user, $200 weekly quota in 3 days, 5x session drain (#41930). |
 
 ---
 
@@ -81,15 +84,17 @@ Users who have confirmed the interceptor resolved their issue:
 
 | User | Issue | What was fixed |
 |------|-------|---------------|
-| @bilby91 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | 1h cache TTL preserved with interceptor on Agent SDK. Tool reorder fix pending (1-char diff under investigation). |
+| @bilby91 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | 1h cache TTL preserved with interceptor on Agent SDK. Tool reorder fix shipped in v1.5.1 (deferred tools sorting + content pinning). |
 
 ---
 
 ## Issues needing our attention
 
 ### Completed (2026-04-09)
-- #41930: Posted source code analysis of "API Usage Billing" header for Alpha2Zulu1872. Follow-up on auth fallback vs token consumption behavior — confirmed payload is identical regardless of auth mode, 1M context gate difference noted. Thumbs-up from Alpha2Zulu1872.
-- #44045: Replied to bilby91 after he tested our interceptor. 1h TTL confirmed working. Asked for details on 1-char tool block diff — potential Agent SDK serialization issue.
+- #41930: Source code analysis of "API Usage Billing" header + auth fallback behavior for Alpha2Zulu1872 (thumbs-up received). Replied to marcuspuchalla (tool search + interceptor) and Adanielyan92 (interceptor recommendation).
+- #44045: bilby91 tested interceptor, 1h TTL confirmed. Debug trace received via email — root cause: readdir ordering jitter + whitespace diff. v1.5.1 shipped with sortDeferredToolsBlock + content pinning fix. Posted sanitized findings publicly.
+- #42052: Replied to Vergil824 — acknowledged npm vs standalone finding, pointed to our interceptor.
+- #43044: Silently closed by Anthropic. Logged in internal tracker.
 
 ### Completed (2026-04-08)
 All previously flagged issues engaged. 8 comments posted across 8 issues.
