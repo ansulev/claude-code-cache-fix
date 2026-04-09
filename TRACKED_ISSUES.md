@@ -29,7 +29,7 @@ Last updated: 2026-04-10
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
 | [#45572](https://github.com/anthropics/claude-code/issues/45572) | CLI usage classified as API billing on Max | Open | Posted isClaudeAISubscriber() source analysis — none of the false conditions apply to their setup. Suggested subprocess auth context and Apr 4 backend regression. Offered interceptor for instrumentation. (2026-04-09) |
 | [#44869](https://github.com/anthropics/claude-code/issues/44869) | Prompt cache completely broken — 16-26K on "hello" | Open | Posted root cause explanation (readdir jitter, resume scatter, TTL gating) and interceptor fix. (2026-04-09) |
-| [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | Open | Countered "fixed in 2.1.97" claim with test data showing resume scatter still present. Linked test report. (2026-04-09) |
+| [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | **Reopened** | Was closed, simpolism claimed "fixed in 2.1.97" — we posted test data showing scatter still present. Reopened after our comment. (2026-04-09) |
 | [#45756](https://github.com/anthropics/claude-code/issues/45756) | Pro Max 5x quota exhausted in 1.5h — cache_read counting at full rate? | Open | Defended against bot auto-closure. Shared v1.6.1 quota tracking, validated molu0219's analysis, collecting off-peak data. (2026-04-09) |
 
 ## Monitoring — Directly relevant
