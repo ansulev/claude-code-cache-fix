@@ -50,6 +50,17 @@ Last updated: 2026-04-09
 | [#33949](https://github.com/anthropics/claude-code/issues/33949) | SSE streaming hangs indefinitely | Open | Root cause analysis with fix proposals. Affects session stability. |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | 59 compactions documented. Related to our memory/CLAUDE.md approach. |
 
+## NEW: Quota accounting / billing routing cluster (Apr 7-9)
+
+| # | Title | State | Why it matters |
+|---|-------|-------|---------------|
+| [#45756](https://github.com/anthropics/claude-code/issues/45756) | Pro Max 5x quota exhausted in 1.5h — cache_read counting at full rate? | Open | **HIGH PRIORITY.** Rigorous analysis by molu0219: 103.9M raw tokens in 1.5h, consistent with cache_read counting at full rate for quota. If confirmed, caching saves $$ but not quota. We added per-call quota tracking in v1.6.1 to investigate. |
+| [#45249](https://github.com/anthropics/claude-code/issues/45249) | Max 20x subscription ignored — 100% routing to Extra Usage | Open | Billing routing regression. Subscription untouched, all calls to Extra Usage. Disabling Extra Usage = hard failure. |
+| [#45572](https://github.com/anthropics/claude-code/issues/45572) | CLI usage classified as API billing on Max | Open | OAuth-only setup, no API key, CC billing as API. Started ~Apr 4. Likely same isClaudeAISubscriber() issue as Alpha2Zulu1872. |
+| [#45660](https://github.com/anthropics/claude-code/issues/45660) | aside_question subagent duplicates entire session | Open | New token drain vector — subagent copies full context, massive waste. |
+| [#45333](https://github.com/anthropics/claude-code/issues/45333) | Excessive token consumption on Opus 4.6 — thinking disproportionate | Open | Thinking overhead separate from cache issues. |
+| [#44869](https://github.com/anthropics/claude-code/issues/44869) | Prompt cache completely broken — 16-26K on "hello" | Open | Total cache failure on v2.1.92. |
+
 ## Community Research
 
 | Resource | Author | Relevance |
@@ -75,6 +86,9 @@ Last updated: 2026-04-09
 | @Vergil824 | Independent npm vs standalone cache confirmation, 1h cache enforcement patch (#42052). |
 | @marcuspuchalla | Reported enable_tool_search improvement on v2.1.74 (#41930). |
 | @Adanielyan92 | v2.1.96 user, $200 weekly quota in 3 days, 5x session drain (#41930). |
+| @molu0219 | Rigorous cache_read quota accounting analysis (#45756). Measured 103.9M raw tokens, hypothesized cache_read counts at full rate for quota. |
+| @triphase-physics | Max 20x billing routing bypass — 100% Extra Usage, subscription untouched (#45249). |
+| @odgriff79 | OAuth-only billing misclassification — CC treating Max as API billing (#45572). |
 
 ---
 
