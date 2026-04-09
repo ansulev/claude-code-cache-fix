@@ -170,6 +170,75 @@ function sortSkillsBlock(text) {
 }
 
 /**
+ * Sort deferred tools listing for deterministic ordering. The block format is:
+ *   <system-reminder>
+ *   The following deferred tools are now available via ToolSearch:
+ *   ToolName1
+ *   ToolName2
+ *   ...
+ *   </system-reminder>
+ *
+ * When MCP tools register asynchronously, new tools can appear between API
+ * calls, changing the block content and busting cache. Sorting ensures that
+ * once a tool appears, its position is deterministic.
+ */
+function sortDeferredToolsBlock(text) {
+  const match = text.match(
+    /^(<system-reminder>\nThe following deferred tools are now available[^\n]*\n)([\s\S]+?)(\n<\/system-reminder>\s*)$/
+  );
+  if (!match) return text;
+  const [, header, toolsList, footer] = match;
+  const tools = toolsList.split("\n").map(t => t.trim()).filter(Boolean);
+  tools.sort();
+  return header + tools.join("\n") + footer;
+}
+
+// --------------------------------------------------------------------------
+// Content pinning for MCP registration jitter (Bug 4)
+// --------------------------------------------------------------------------
+//
+// When MCP tools register asynchronously, the skills and deferred tools blocks
+// can change between consecutive API calls as new tools finish registering.
+// This causes repeated cache busts even though the final tool set is stable.
+//
+// Fix: track the content hash of each block type. When content changes, accept
+// one cache miss (the new tool needs to be visible), then pin the new content.
+// If the SAME content appears on consecutive calls, use the pinned version
+// with normalized whitespace to prevent trivial diffs.
+//
+// Reported by @bilby91 on #44045 (Agent SDK with MCP tools).
+// --------------------------------------------------------------------------
+
+const _pinnedBlocks = new Map(); // blockType → { hash, text }
+
+/**
+ * Normalize a block's trailing whitespace and pin its content. Returns the
+ * normalized text. On first call for a block type, pins the content. On
+ * subsequent calls, if the content hash matches the pin, returns the pinned
+ * version (byte-identical). If content changed, updates the pin and returns
+ * the new content (accepts one cache bust).
+ */
+function pinBlockContent(blockType, text) {
+  // Normalize: trim trailing whitespace inside the </system-reminder> tag
+  const normalized = text.replace(/\s+(<\/system-reminder>)\s*$/, "\n$1");
+
+  const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  const pinned = _pinnedBlocks.get(blockType);
+
+  if (pinned && pinned.hash === hash) {
+    // Content matches pin — return pinned version (byte-identical)
+    return pinned.text;
+  }
+
+  // Content changed or first call — update pin
+  if (pinned && pinned.hash !== hash) {
+    debugLog(`CONTENT PIN: ${blockType} changed (${pinned.hash} → ${hash}) — accepting one cache bust`);
+  }
+  _pinnedBlocks.set(blockType, { hash, text: normalized });
+  return normalized;
+}
+
+/**
  * Strip session_knowledge from hooks blocks — ephemeral content that differs
  * between sessions and would bust cache.
  */
@@ -226,7 +295,46 @@ function normalizeResumeMessages(messages) {
       }
     }
   }
-  if (!hasScatteredBlocks) return messages;
+
+  // Even when blocks aren't scattered, apply sorting and content pinning to
+  // blocks in messages[0]. This handles MCP registration jitter where block
+  // CONTENT changes between calls (new tool registers) without scattering.
+  // (Reported by @bilby91 — Agent SDK with async MCP tools, #44045)
+  if (!hasScatteredBlocks) {
+    let contentModified = false;
+    const newContent = firstMsg.content.map((block) => {
+      const text = block.text || "";
+      if (!isRelocatableBlock(text)) return block;
+
+      let fixedText = text;
+      if (isSkillsBlock(text)) fixedText = sortSkillsBlock(text);
+      else if (isDeferredToolsBlock(text)) fixedText = sortDeferredToolsBlock(text);
+      else if (isHooksBlock(text)) fixedText = stripSessionKnowledge(text);
+
+      // Determine block type for pinning
+      let blockType;
+      if (isSkillsBlock(text)) blockType = "skills";
+      else if (isDeferredToolsBlock(text)) blockType = "deferred";
+      else if (isMcpBlock(text)) blockType = "mcp";
+      else if (isHooksBlock(text)) blockType = "hooks";
+
+      if (blockType) fixedText = pinBlockContent(blockType, fixedText);
+
+      if (fixedText !== text) {
+        contentModified = true;
+        const { cache_control, ...rest } = block;
+        return { ...rest, text: fixedText };
+      }
+      return block;
+    });
+
+    if (contentModified) {
+      return messages.map((msg, idx) =>
+        idx === firstUserIdx ? { ...msg, content: newContent } : msg
+      );
+    }
+    return messages;
+  }
 
   // Scan ALL user messages (including first) in reverse to collect the LATEST
   // version of each block type. This handles both full and partial scatter.
@@ -254,6 +362,10 @@ function normalizeResumeMessages(messages) {
         let fixedText = text;
         if (blockType === "hooks") fixedText = stripSessionKnowledge(text);
         if (blockType === "skills") fixedText = sortSkillsBlock(text);
+        if (blockType === "deferred") fixedText = sortDeferredToolsBlock(text);
+
+        // Pin content to prevent jitter from late MCP tool registration
+        fixedText = pinBlockContent(blockType, fixedText);
 
         const { cache_control, ...rest } = block;
         found.set(blockType, { ...rest, text: fixedText });
