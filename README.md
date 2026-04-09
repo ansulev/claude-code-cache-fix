@@ -118,6 +118,19 @@ Response headers are parsed for `anthropic-ratelimit-unified-5h-utilization` and
 
 Anthropic applies elevated quota drain rates during weekday peak hours (13:00–19:00 UTC, Mon–Fri). The interceptor detects peak windows and writes `peak_hour: true/false` to `quota-status.json`. See `docs/peak-hours-reference.md` for sources and details.
 
+### Usage telemetry and cost reporting
+
+The interceptor logs per-call usage data to `~/.claude/usage.jsonl` — one JSON line per API call with model, token counts, and cache breakdown. Use the bundled cost report tool to analyze costs:
+
+```bash
+node tools/cost-report.mjs                    # today's costs from interceptor log
+node tools/cost-report.mjs --date 2026-04-08  # specific date
+node tools/cost-report.mjs --since 2h         # last 2 hours
+node tools/cost-report.mjs --admin-key <key>  # cross-reference with Admin API
+```
+
+Also works with any JSONL containing Anthropic usage fields (`--file`, stdin) — useful for SDK users and proxy setups. See `docs/cost-report.md` for full documentation.
+
 ## Debug mode
 
 Enable debug logging to verify the fix is working:
@@ -157,6 +170,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 | `CACHE_FIX_DEBUG` | `0` | Enable debug logging to `~/.claude/cache-fix-debug.log` |
 | `CACHE_FIX_PREFIXDIFF` | `0` | Enable prefix snapshot diffing |
 | `CACHE_FIX_IMAGE_KEEP_LAST` | `0` | Keep images in last N user messages (0 = disabled) |
+| `CACHE_FIX_USAGE_LOG` | `~/.claude/usage.jsonl` | Path for per-call usage telemetry log |
 
 ## Limitations
 

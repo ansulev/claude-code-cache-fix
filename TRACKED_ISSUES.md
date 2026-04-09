@@ -2,7 +2,7 @@
 
 Issues we are actively monitoring, have commented on, or are directly relevant to our interceptor work.
 
-Last updated: 2026-04-08
+Last updated: 2026-04-09
 
 ## Legend
 
@@ -25,7 +25,7 @@ Last updated: 2026-04-08
 | [#44724](https://github.com/anthropics/claude-code/issues/44724) | Subagent cache miss on first SendMessage resume | Open | Posted analysis — cache_read=0 suggests system prompt differs between Agent and SendMessage, not just block scatter. Asked for mitmproxy diff. (2026-04-08) |
 | [#42542](https://github.com/anthropics/claude-code/issues/42542) | Silent context degradation — microcompact, cached microcompact, session memory compact | Open | Posted interceptor monitoring data — 0 microcompact events in 4,700+ calls, 84 budget warnings, confirmed no DISABLE_MICROCOMPACT. (2026-04-08) |
 | [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | Posted comparison data — no growth on minimal setup between v2.1.92 and v2.1.96; growth is plugin-amplified. Added prompt size measurement feature. (2026-04-08) |
-| [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes — 52-73% block scatter, 98% tool reorder, image carry-forward, TTL downgrade. (2026-04-08) |
+| [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes (2026-04-08). Source code analysis of "API Usage Billing" header — fallback label when OAuth subscriber check fails, not a new billing mode (2026-04-09). |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
 
 ## Monitoring — Directly relevant
@@ -67,7 +67,8 @@ Last updated: 2026-04-08
 | @jmarianski | MITM proxy + Ghidra reverse engineering of standalone binary. Multi-mode cache test script. |
 | @VictorSun92 | Original monkey-patch fix for v2.1.88, partial scatter detection on v2.1.90. |
 | @ArkNill | Systematic proxy-based analysis of 7 hidden bugs. Microcompact/budget/false-rate-limiter documentation. |
-| @bilby91 | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. |
+| @bilby91 | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. Agent SDK user (API-billed), planning to try our interceptor. |
+| @Alpha2Zulu1872 | Persistent phantom billing on disabled keys, "API Usage Billing" header investigation (#41930). Active support ticket 215473797766657. |
 | @Sn3th | Comprehensive microcompact/context degradation documentation (#42542). Three clearing mechanisms identified. |
 | @kolkov | Source-code verified analysis of 3 regressions in session loading pipeline (#43044). |
 | @labzink | Subagent/SendMessage cache miss discovery (#44724). |
@@ -76,5 +77,8 @@ Last updated: 2026-04-08
 
 ## Issues needing our attention
 
+### Completed (2026-04-09)
+- #41930: Posted source code analysis of "API Usage Billing" header for Alpha2Zulu1872.
+
 ### Completed (2026-04-08)
-All previously flagged issues have been engaged. No outstanding items.
+All previously flagged issues engaged. 8 comments posted across 8 issues.

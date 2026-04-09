@@ -399,6 +399,7 @@ const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
 const PREFIXDIFF = process.env.CACHE_FIX_PREFIXDIFF === "1";
 const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
 const SNAPSHOT_DIR = join(homedir(), ".claude", "cache-fix-snapshots");
+const USAGE_JSONL = process.env.CACHE_FIX_USAGE_LOG || join(homedir(), ".claude", "usage.jsonl");
 
 function debugLog(...args) {
   if (!DEBUG) return;
@@ -813,10 +814,13 @@ globalThis.fetch = async function (url, options) {
       // Non-critical — don't break the response
     }
 
-    // Clone response to extract TTL tier from usage (SSE stream)
+    // Clone response to extract TTL tier and usage telemetry from SSE stream.
+    // Pass the model from the request so we can log a complete usage record.
     try {
+      let reqModel = "unknown";
+      try { reqModel = JSON.parse(options?.body)?.model || "unknown"; } catch {}
       const clone = response.clone();
-      drainTTLFromClone(clone).catch(() => {});
+      drainTTLFromClone(clone, reqModel).catch(() => {});
     } catch {
       // clone() failure is non-fatal
     }
@@ -837,12 +841,17 @@ globalThis.fetch = async function (url, options) {
  * Writes TTL tier to ~/.claude/quota-status.json (merges with existing data)
  * and logs to debug log.
  */
-async function drainTTLFromClone(clone) {
+async function drainTTLFromClone(clone, model) {
   if (!clone.body) return;
 
   const reader = clone.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+
+  // Accumulate usage across message_start (input/cache) and message_delta (output)
+  let startUsage = null;
+  let deltaUsage = null;
+  let ttlTier = "unknown";
 
   try {
     while (true) {
@@ -862,6 +871,7 @@ async function drainTTLFromClone(clone) {
 
           if (event.type === "message_start" && event.message?.usage) {
             const u = event.message.usage;
+            startUsage = u;
             const cc = u.cache_creation || {};
             const e1h = cc.ephemeral_1h_input_tokens ?? 0;
             const e5m = cc.ephemeral_5m_input_tokens ?? 0;
@@ -869,8 +879,6 @@ async function drainTTLFromClone(clone) {
             const cacheRead = u.cache_read_input_tokens ?? 0;
 
             // Determine TTL tier from which ephemeral bucket got tokens
-            // When cache is fully warm (no creation), infer tier from previous
-            let ttlTier = "unknown";
             if (e1h > 0 && e5m === 0) ttlTier = "1h";
             else if (e5m > 0 && e1h === 0) ttlTier = "5m";
             else if (e1h === 0 && e5m === 0 && cacheCreate === 0) {
@@ -908,10 +916,11 @@ async function drainTTLFromClone(clone) {
               };
               writeFileSync(quotaFile, JSON.stringify(quota, null, 2));
             } catch {}
+          }
 
-            // Got what we need — stop reading
-            reader.cancel();
-            return;
+          // Capture final usage from message_delta (has output_tokens)
+          if (event.type === "message_delta" && event.usage) {
+            deltaUsage = event.usage;
           }
         } catch {
           // Skip malformed SSE lines
@@ -920,5 +929,26 @@ async function drainTTLFromClone(clone) {
     }
   } finally {
     try { reader.releaseLock(); } catch {}
+  }
+
+  // Write usage record to JSONL after stream completes
+  if (startUsage) {
+    try {
+      const cc = startUsage.cache_creation || {};
+      const record = {
+        timestamp: new Date().toISOString(),
+        model: model || "unknown",
+        input_tokens: startUsage.input_tokens ?? 0,
+        output_tokens: deltaUsage?.output_tokens ?? 0,
+        cache_read_input_tokens: startUsage.cache_read_input_tokens ?? 0,
+        cache_creation_input_tokens: startUsage.cache_creation_input_tokens ?? 0,
+        ephemeral_1h_input_tokens: cc.ephemeral_1h_input_tokens ?? 0,
+        ephemeral_5m_input_tokens: cc.ephemeral_5m_input_tokens ?? 0,
+        ttl_tier: ttlTier,
+      };
+      appendFileSync(USAGE_JSONL, JSON.stringify(record) + "\n");
+    } catch {
+      // Non-critical — don't break anything
+    }
   }
 }
