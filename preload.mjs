@@ -834,6 +834,41 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
+      // Bug 5: 1h TTL enforcement
+      // The client gates 1h cache TTL behind a GrowthBook allowlist that checks
+      // querySource against patterns like "repl_main_thread*", "sdk", "auto_mode".
+      // Interactive CLI sessions may not match any pattern, causing the client to
+      // send cache_control without ttl (defaulting to 5m server-side).
+      // The server honors whatever TTL the client requests — so we inject it.
+      // Discovered by @TigerKay1926 on #42052 using our GrowthBook flag dump.
+      if (payload.system) {
+        let ttlInjected = 0;
+        payload.system = payload.system.map((block) => {
+          if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
+            ttlInjected++;
+            return { ...block, cache_control: { ...block.cache_control, ttl: "1h" } };
+          }
+          return block;
+        });
+        // Also check messages for cache_control blocks (conversation history breakpoints)
+        if (payload.messages) {
+          for (const msg of payload.messages) {
+            if (!Array.isArray(msg.content)) continue;
+            for (let i = 0; i < msg.content.length; i++) {
+              const b = msg.content[i];
+              if (b.cache_control?.type === "ephemeral" && !b.cache_control.ttl) {
+                msg.content[i] = { ...b, cache_control: { ...b.cache_control, ttl: "1h" } };
+                ttlInjected++;
+              }
+            }
+          }
+        }
+        if (ttlInjected > 0) {
+          modified = true;
+          debugLog(`APPLIED: 1h TTL injected on ${ttlInjected} cache_control block(s)`);
+        }
+      }
+
       if (modified) {
         options = { ...options, body: JSON.stringify(payload) };
         debugLog("Request body rewritten");
