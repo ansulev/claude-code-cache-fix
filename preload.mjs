@@ -962,12 +962,18 @@ globalThis.fetch = async function (url, options) {
     }
 
     // Clone response to extract TTL tier and usage telemetry from SSE stream.
-    // Pass the model from the request so we can log a complete usage record.
+    // Pass the model and quota headers so we can log a complete usage record.
     try {
       let reqModel = "unknown";
       try { reqModel = JSON.parse(options?.body)?.model || "unknown"; } catch {}
+      const quotaHeaders = {
+        q5h: parseFloat(response.headers.get("anthropic-ratelimit-unified-5h-utilization") || "0"),
+        q7d: parseFloat(response.headers.get("anthropic-ratelimit-unified-7d-utilization") || "0"),
+        status: response.headers.get("anthropic-ratelimit-unified-status") || null,
+        overage: response.headers.get("anthropic-ratelimit-unified-overage-status") || null,
+      };
       const clone = response.clone();
-      drainTTLFromClone(clone, reqModel).catch(() => {});
+      drainTTLFromClone(clone, reqModel, quotaHeaders).catch(() => {});
     } catch {
       // clone() failure is non-fatal
     }
@@ -988,7 +994,7 @@ globalThis.fetch = async function (url, options) {
  * Writes TTL tier to ~/.claude/quota-status.json (merges with existing data)
  * and logs to debug log.
  */
-async function drainTTLFromClone(clone, model) {
+async function drainTTLFromClone(clone, model, quotaHeaders) {
   if (!clone.body) return;
 
   const reader = clone.body.getReader();
@@ -1082,8 +1088,11 @@ async function drainTTLFromClone(clone, model) {
   if (startUsage) {
     try {
       const cc = startUsage.cache_creation || {};
+      const now = new Date();
+      const utcHour = now.getUTCHours();
+      const utcDay = now.getUTCDay();
       const record = {
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
         model: model || "unknown",
         input_tokens: startUsage.input_tokens ?? 0,
         output_tokens: deltaUsage?.output_tokens ?? 0,
@@ -1092,6 +1101,9 @@ async function drainTTLFromClone(clone, model) {
         ephemeral_1h_input_tokens: cc.ephemeral_1h_input_tokens ?? 0,
         ephemeral_5m_input_tokens: cc.ephemeral_5m_input_tokens ?? 0,
         ttl_tier: ttlTier,
+        q5h_pct: quotaHeaders ? Math.round(quotaHeaders.q5h * 100) : null,
+        q7d_pct: quotaHeaders ? Math.round(quotaHeaders.q7d * 100) : null,
+        peak_hour: utcDay >= 1 && utcDay <= 5 && utcHour >= 13 && utcHour < 19,
       };
       appendFileSync(USAGE_JSONL, JSON.stringify(record) + "\n");
     } catch {
