@@ -29,13 +29,14 @@ Last updated: 2026-04-10
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
 | [#45572](https://github.com/anthropics/claude-code/issues/45572) | CLI usage classified as API billing on Max | Open | Posted isClaudeAISubscriber() source analysis — none of the false conditions apply to their setup. Suggested subprocess auth context and Apr 4 backend regression. Offered interceptor for instrumentation. (2026-04-09) |
 | [#44869](https://github.com/anthropics/claude-code/issues/44869) | Prompt cache completely broken — 16-26K on "hello" | Open | Posted root cause explanation (readdir jitter, resume scatter, TTL gating) and interceptor fix. (2026-04-09) |
+| [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | Open | Countered "fixed in 2.1.97" claim with test data showing resume scatter still present. Linked test report. (2026-04-09) |
+| [#45756](https://github.com/anthropics/claude-code/issues/45756) | Pro Max 5x quota exhausted in 1.5h — cache_read counting at full rate? | Open | Defended against bot auto-closure. Shared v1.6.1 quota tracking, validated molu0219's analysis, collecting off-peak data. (2026-04-09) |
 
 ## Monitoring — Directly relevant
 
 | # | Title | State | Why it matters | Fresh activity |
 |---|-------|-------|---------------|----------------|
 | [#43044](https://github.com/anthropics/claude-code/issues/43044) | --resume loads 0% context on v2.1.91 | **Closed** | Three regressions in session loading pipeline, source-code verified. Listed in our README. **Silently closed by Anthropic with no comment (2026-04-09).** ArkNill flagged it. | 2026-04-09 |
-| [#43657](https://github.com/anthropics/claude-code/issues/43657) | Resume/continue cache invalidation | Open | Confirms resume cache invalidation on v2.1.92. Listed in our README. | 2026-04-04 |
 
 ## Monitoring — Related (quota/cost/context)
 
@@ -56,7 +57,6 @@ Last updated: 2026-04-10
 
 | # | Title | State | Why it matters |
 |---|-------|-------|---------------|
-| [#45756](https://github.com/anthropics/claude-code/issues/45756) | Pro Max 5x quota exhausted in 1.5h — cache_read counting at full rate? | Open | **HIGH PRIORITY.** Rigorous analysis by molu0219: 103.9M raw tokens in 1.5h, consistent with cache_read counting at full rate for quota. If confirmed, caching saves $$ but not quota. We added per-call quota tracking in v1.6.1 to investigate. |
 | [#45249](https://github.com/anthropics/claude-code/issues/45249) | Max 20x subscription ignored — 100% routing to Extra Usage | Open | Billing routing regression. Subscription untouched, all calls to Extra Usage. Disabling Extra Usage = hard failure. |
 
 | [#45660](https://github.com/anthropics/claude-code/issues/45660) | aside_question subagent duplicates entire session | Open | New token drain vector — subagent copies full context, massive waste. |
@@ -109,6 +109,8 @@ Users who have confirmed the interceptor resolved their issue:
 ### Completed (2026-04-10)
 - #45572: Posted isClaudeAISubscriber() source analysis for odgriff79. First comment on the issue.
 - #44869: Posted cache bug root cause explanation and interceptor fix for talesmetal. First comment on the issue.
+- #43657: Countered simpolism's "fixed in 2.1.97" claim with v2.1.97 test data showing resume scatter still present.
+- #45756: Posted to defend against bot auto-closure. Shared v1.6.1 quota tracking capability, validated molu0219's analysis.
 
 ### Completed (2026-04-09)
 - #41930: Source code analysis of "API Usage Billing" header + auth fallback behavior for Alpha2Zulu1872 (thumbs-up received). Replied to marcuspuchalla (tool search + interceptor) and Adanielyan92 (interceptor recommendation).
