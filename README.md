@@ -1,5 +1,7 @@
 # claude-code-cache-fix
 
+English | [中文](./README.zh.md)
+
 Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.92.
 
 ## The problem

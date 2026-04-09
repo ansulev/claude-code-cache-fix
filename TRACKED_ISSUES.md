@@ -21,7 +21,7 @@ Last updated: 2026-04-09
 | [#42052](https://github.com/anthropics/claude-code/issues/42052) | Max 20x plan: 100% usage after 2 hours | Open | Bidirectional TTL data, overage mechanism analysis. TigerKay1926 has contradicting data (stuck 5m TTL). |
 | [#42260](https://github.com/anthropics/claude-code/issues/42260) | Resume loads disproportionate tokens from thinking signatures | Open | Posted analysis of opaque thinking token overhead. |
 | [#27048](https://github.com/anthropics/claude-code/issues/27048) | Prompt cache invalidation on resume: plugin state changes | Open | Posted interceptor as solution, replied to thoeltig re: plugin registration logic (2026-04-08). |
-| [#44045](https://github.com/anthropics/claude-code/issues/44045) | Prompt cache partial miss on every --resume turn | Open | Posted interceptor data, confirmed skill_listing block scatter. Linked normalizeResumeMessages code. (2026-04-08) |
+| [#44045](https://github.com/anthropics/claude-code/issues/44045) | Prompt cache partial miss on every --resume turn | Open | Posted interceptor data, confirmed skill_listing block scatter (2026-04-08). bilby91 tested interceptor — 1h TTL works, found 1-char tool diff in Agent SDK. Asked for details (2026-04-09). |
 | [#44724](https://github.com/anthropics/claude-code/issues/44724) | Subagent cache miss on first SendMessage resume | Open | Posted analysis — cache_read=0 suggests system prompt differs between Agent and SendMessage, not just block scatter. Asked for mitmproxy diff. (2026-04-08) |
 | [#42542](https://github.com/anthropics/claude-code/issues/42542) | Silent context degradation — microcompact, cached microcompact, session memory compact | Open | Posted interceptor monitoring data — 0 microcompact events in 4,700+ calls, 84 budget warnings, confirmed no DISABLE_MICROCOMPACT. (2026-04-08) |
 | [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | Posted comparison data — no growth on minimal setup between v2.1.92 and v2.1.96; growth is plugin-amplified. Added prompt size measurement feature. (2026-04-08) |
@@ -67,7 +67,7 @@ Last updated: 2026-04-09
 | @jmarianski | MITM proxy + Ghidra reverse engineering of standalone binary. Multi-mode cache test script. |
 | @VictorSun92 | Original monkey-patch fix for v2.1.88, partial scatter detection on v2.1.90. |
 | @ArkNill | Systematic proxy-based analysis of 7 hidden bugs. Microcompact/budget/false-rate-limiter documentation. |
-| @bilby91 | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. Agent SDK user (API-billed), planning to try our interceptor. |
+| @bilby91 | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. Agent SDK user (API-billed). Tested interceptor — 1h TTL works, found 1-char tool diff unique to SDK. |
 | @Alpha2Zulu1872 | Persistent phantom billing on disabled keys, "API Usage Billing" header investigation (#41930). Active support ticket 215473797766657. |
 | @Sn3th | Comprehensive microcompact/context degradation documentation (#42542). Three clearing mechanisms identified. |
 | @kolkov | Source-code verified analysis of 3 regressions in session loading pipeline (#43044). |
@@ -75,10 +75,21 @@ Last updated: 2026-04-09
 
 ---
 
+## Confirmed Fixes
+
+Users who have confirmed the interceptor resolved their issue:
+
+| User | Issue | What was fixed |
+|------|-------|---------------|
+| @bilby91 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | 1h cache TTL preserved with interceptor on Agent SDK. Tool reorder fix pending (1-char diff under investigation). |
+
+---
+
 ## Issues needing our attention
 
 ### Completed (2026-04-09)
-- #41930: Posted source code analysis of "API Usage Billing" header for Alpha2Zulu1872.
+- #41930: Posted source code analysis of "API Usage Billing" header for Alpha2Zulu1872. Follow-up on auth fallback vs token consumption behavior — confirmed payload is identical regardless of auth mode, 1M context gate difference noted. Thumbs-up from Alpha2Zulu1872.
+- #44045: Replied to bilby91 after he tested our interceptor. 1h TTL confirmed working. Asked for details on 1-char tool block diff — potential Agent SDK serialization issue.
 
 ### Completed (2026-04-08)
 All previously flagged issues engaged. 8 comments posted across 8 issues.
