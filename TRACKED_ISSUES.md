@@ -2,7 +2,7 @@
 
 Issues we are actively monitoring, have commented on, or are directly relevant to our interceptor work.
 
-Last updated: 2026-04-09
+Last updated: 2026-04-10
 
 ## Legend
 
@@ -27,6 +27,8 @@ Last updated: 2026-04-09
 | [#45188](https://github.com/anthropics/claude-code/issues/45188) | System prompt grew ~70K tokens between v2.1.89 and v2.1.96 | Open | Posted comparison data — no growth on minimal setup between v2.1.92 and v2.1.96; growth is plugin-amplified. Added prompt size measurement feature. (2026-04-08) |
 | [#41930](https://github.com/anthropics/claude-code/issues/41930) | Critical: Widespread abnormal usage drain — multiple root causes | Open | Posted interceptor data corroborating root causes (2026-04-08). Source code analysis of "API Usage Billing" header, auth fallback vs token behavior (2026-04-09). Replied to marcuspuchalla (tool search) and Adanielyan92 (interceptor) (2026-04-09). |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | Shared our memory system approach — MEMORY.md index + typed topic files with YAML frontmatter. (2026-04-08) |
+| [#45572](https://github.com/anthropics/claude-code/issues/45572) | CLI usage classified as API billing on Max | Open | Posted isClaudeAISubscriber() source analysis — none of the false conditions apply to their setup. Suggested subprocess auth context and Apr 4 backend regression. Offered interceptor for instrumentation. (2026-04-09) |
+| [#44869](https://github.com/anthropics/claude-code/issues/44869) | Prompt cache completely broken — 16-26K on "hello" | Open | Posted root cause explanation (readdir jitter, resume scatter, TTL gating) and interceptor fix. (2026-04-09) |
 
 ## Monitoring — Directly relevant
 
@@ -56,10 +58,10 @@ Last updated: 2026-04-09
 |---|-------|-------|---------------|
 | [#45756](https://github.com/anthropics/claude-code/issues/45756) | Pro Max 5x quota exhausted in 1.5h — cache_read counting at full rate? | Open | **HIGH PRIORITY.** Rigorous analysis by molu0219: 103.9M raw tokens in 1.5h, consistent with cache_read counting at full rate for quota. If confirmed, caching saves $$ but not quota. We added per-call quota tracking in v1.6.1 to investigate. |
 | [#45249](https://github.com/anthropics/claude-code/issues/45249) | Max 20x subscription ignored — 100% routing to Extra Usage | Open | Billing routing regression. Subscription untouched, all calls to Extra Usage. Disabling Extra Usage = hard failure. |
-| [#45572](https://github.com/anthropics/claude-code/issues/45572) | CLI usage classified as API billing on Max | Open | OAuth-only setup, no API key, CC billing as API. Started ~Apr 4. Likely same isClaudeAISubscriber() issue as Alpha2Zulu1872. |
+
 | [#45660](https://github.com/anthropics/claude-code/issues/45660) | aside_question subagent duplicates entire session | Open | New token drain vector — subagent copies full context, massive waste. |
 | [#45333](https://github.com/anthropics/claude-code/issues/45333) | Excessive token consumption on Opus 4.6 — thinking disproportionate | Open | Thinking overhead separate from cache issues. |
-| [#44869](https://github.com/anthropics/claude-code/issues/44869) | Prompt cache completely broken — 16-26K on "hello" | Open | Total cache failure on v2.1.92. |
+
 
 ## Community Research
 
@@ -103,6 +105,10 @@ Users who have confirmed the interceptor resolved their issue:
 ---
 
 ## Issues needing our attention
+
+### Completed (2026-04-10)
+- #45572: Posted isClaudeAISubscriber() source analysis for odgriff79. First comment on the issue.
+- #44869: Posted cache bug root cause explanation and interceptor fix for talesmetal. First comment on the issue.
 
 ### Completed (2026-04-09)
 - #41930: Source code analysis of "API Usage Billing" header + auth fallback behavior for Alpha2Zulu1872 (thumbs-up received). Replied to marcuspuchalla (tool search + interceptor) and Adanielyan92 (interceptor recommendation).
