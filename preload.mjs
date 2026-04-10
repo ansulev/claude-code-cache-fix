@@ -1241,3 +1241,31 @@ async function drainTTLFromClone(clone, model, quotaHeaders) {
     }
   }
 }
+
+// --------------------------------------------------------------------------
+// Test exports
+// --------------------------------------------------------------------------
+//
+// These exports exist for unit testing the pure functions in this file. They
+// have no effect on the interceptor's runtime behavior — production callers
+// load this module via NODE_OPTIONS=--import and never use named imports.
+// Tests import from this file directly: `import { sortSkillsBlock } from
+// '../preload.mjs'`. The fetch patching above runs at import time but is
+// harmless in a test process since tests do not make fetch calls.
+
+export {
+  sortSkillsBlock,
+  sortDeferredToolsBlock,
+  pinBlockContent,
+  stripSessionKnowledge,
+  stabilizeFingerprint,
+  computeFingerprint,
+  isSkillsBlock,
+  isDeferredToolsBlock,
+  isHooksBlock,
+  isMcpBlock,
+  isRelocatableBlock,
+  rewriteOutputEfficiencyInstruction,
+  normalizeOutputEfficiencyReplacement,
+  _pinnedBlocks,  // exported so tests can reset between runs
+};
