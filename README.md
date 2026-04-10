@@ -217,6 +217,26 @@ node tools/cost-report.mjs --admin-key <key>  # cross-reference with Admin API
 
 Also works with any JSONL containing Anthropic usage fields (`--file`, stdin) — useful for SDK users and proxy setups. See `docs/cost-report.md` for full documentation.
 
+### Quota analysis (5-hour quota counting)
+
+The same `usage.jsonl` log can be analyzed to test how Anthropic's 5-hour quota is actually computed. Run the bundled tool:
+
+```bash
+node tools/quota-analysis.mjs              # analyze your default log
+node tools/quota-analysis.mjs --since 24h  # last 24 hours only
+node tools/quota-analysis.mjs --json       # machine-readable output
+```
+
+The tool answers three questions from your own data:
+
+1. **Does `cache_read` count toward your 5-hour quota?** Tests three hypotheses (cache_read costs 0x / 0.1x / 1x of input rate) and reports which one best explains your `q5h_pct` trajectory across reset windows. Lower coefficient of variation across windows = better fit.
+2. **Do peak hours cost more quota per token?** Splits windows into peak-dominant (≥80% peak calls) and off-peak-dominant (≤20%) and compares the implied 100% quota under the best-fit model.
+3. **What is your account's effective 5-hour quota in token-equivalents?** Reports a concrete number you can compare against your subscription tier or against what other users measure.
+
+Requires `q5h_pct`, `q7d_pct`, and `peak_hour` fields in usage.jsonl, which were added in v1.6.1 (2026-04-09). Older entries are silently filtered out.
+
+**Help us validate across accounts:** if you run this on your own log, please open an issue or PR on this repo with your output (or just the best-fit hypothesis name and your peak/off-peak ratio). Cross-validating across multiple accounts is the only way to distinguish per-account variance from real findings. Reference: [anthropics/claude-code#45756](https://github.com/anthropics/claude-code/issues/45756).
+
 ## Debug mode
 
 Enable debug logging to verify the fix is working:
