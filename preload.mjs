@@ -648,6 +648,7 @@ function dumpGrowthBookFlags() {
       cold_compact: features.tengu_cold_compact,
       system_prompt_global_cache: features.tengu_system_prompt_global_cache,
       compact_cache_prefix: features.tengu_compact_cache_prefix,
+      onyx_plover: features.tengu_onyx_plover,
     };
     debugLog("GROWTHBOOK FLAGS:", JSON.stringify(interesting, null, 2));
   } catch (e) {
