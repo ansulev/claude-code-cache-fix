@@ -510,6 +510,76 @@ function stabilizeToolOrder(tools) {
 }
 
 // --------------------------------------------------------------------------
+// System prompt rewrite (optional)
+// --------------------------------------------------------------------------
+
+const OUTPUT_EFFICIENCY_SECTION_HEADER = "# Output efficiency";
+const OUTPUT_EFFICIENCY_REPLACEMENT_RAW =
+  process.env.CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT || "";
+const OUTPUT_EFFICIENCY_SECTION_REPLACEMENT =
+  normalizeOutputEfficiencyReplacement(OUTPUT_EFFICIENCY_REPLACEMENT_RAW);
+
+function normalizeOutputEfficiencyReplacement(text) {
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (!trimmed) return "";
+  return trimmed.startsWith(OUTPUT_EFFICIENCY_SECTION_HEADER)
+    ? trimmed
+    : `${OUTPUT_EFFICIENCY_SECTION_HEADER}\n\n${trimmed}`;
+}
+
+/**
+ * Replace Claude Code's entire output-efficiency section in-place while
+ * preserving the existing system block structure and cache_control fields.
+ */
+function rewriteOutputEfficiencyInstruction(system) {
+  if (!Array.isArray(system) || !OUTPUT_EFFICIENCY_SECTION_REPLACEMENT) {
+    return null;
+  }
+
+  let changed = false;
+  const rewritten = system.map((block) => {
+    if (
+      block?.type !== "text" ||
+      typeof block.text !== "string" ||
+      !block.text.includes(OUTPUT_EFFICIENCY_SECTION_HEADER)
+    ) {
+      return block;
+    }
+
+    const nextText = replaceOutputEfficiencySection(block.text);
+    if (!nextText || nextText === block.text) {
+      return block;
+    }
+
+    changed = true;
+    return { ...block, text: nextText };
+  });
+
+  return changed ? rewritten : null;
+}
+
+function replaceOutputEfficiencySection(text) {
+  const start = text.indexOf(OUTPUT_EFFICIENCY_SECTION_HEADER);
+  if (start === -1) return null;
+
+  const afterHeader = start + OUTPUT_EFFICIENCY_SECTION_HEADER.length;
+  const remainder = text.slice(afterHeader);
+  const nextHeadingMatch = remainder.match(/\n# [^\n]+/);
+
+  if (!nextHeadingMatch || nextHeadingMatch.index == null) {
+    return text.slice(0, start) + OUTPUT_EFFICIENCY_SECTION_REPLACEMENT;
+  }
+
+  const nextHeadingStart = afterHeader + nextHeadingMatch.index + 1;
+  return (
+    text.slice(0, start) +
+    OUTPUT_EFFICIENCY_SECTION_REPLACEMENT +
+    "\n\n" +
+    text.slice(nextHeadingStart)
+  );
+}
+
+// --------------------------------------------------------------------------
 // Fetch interceptor
 // --------------------------------------------------------------------------
 
@@ -878,6 +948,18 @@ globalThis.fetch = async function (url, options) {
         if (normalized > 0) {
           modified = true;
           debugLog(`APPLIED: identity normalized on ${normalized} system block(s) (Agent SDK → Claude Code)`);
+        }
+      }
+
+      // Optional: rewrite Claude Code's default output-efficiency section
+      if (payload.system && OUTPUT_EFFICIENCY_SECTION_REPLACEMENT) {
+        const rewritten = rewriteOutputEfficiencyInstruction(payload.system);
+        if (rewritten) {
+          payload.system = rewritten;
+          modified = true;
+          debugLog("APPLIED: output efficiency section rewritten");
+        } else {
+          debugLog("SKIPPED: output efficiency rewrite (section not found)");
         }
       }
 
