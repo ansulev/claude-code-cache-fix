@@ -2,7 +2,7 @@
 
 Issues we are actively monitoring, have commented on, or are directly relevant to our interceptor work.
 
-Last updated: 2026-04-10
+Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 
 ## Legend
 
@@ -100,16 +100,25 @@ Users who have confirmed the interceptor resolved their issue:
 
 | User | Issue | What was fixed |
 |------|-------|---------------|
-| @bilby91 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | 1h cache TTL preserved with interceptor on Agent SDK. Tool reorder fix shipped in v1.5.1 (deferred tools sorting + content pinning). |
+| @bilby91 | [#44045](https://github.com/anthropics/claude-code/issues/44045) | 1h cache TTL preserved with interceptor on Agent SDK. Tool reorder fix shipped in v1.5.1. Fresh-session sort fix shipped in v1.6.2 — root cause: `normalizeResumeMessages` early-return on `length < 2` left first call unsorted, busting cache prefix on every resume turn. |
 
 ---
 
 ## Issues needing our attention
 
-### Completed (2026-04-10)
+### Completed (2026-04-10 afternoon — v1.6.2 release)
+- **v1.6.2 shipped to npm.** Three changes:
+  - fix: fresh-session sort/pin (#5, bilby91 #44045) — removed `messages.length < 2` early return. Validated on CC v2.1.97 + v2.1.100, call 2 cache_read = call 1 cache_creation to the exact token.
+  - feat: opt-in identity normalization (#6, labzink #44724) — `CACHE_FIX_NORMALIZE_IDENTITY=1` rewrites Agent SDK identity in `system[1]` to canonical Claude Code identity, fixing Agent()→SendMessage() cache parity.
+  - feat: opt-in output efficiency rewrite hook (#1/#4, @VictorSun92 PR) — `CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT` rewrites the `# Output efficiency` system prompt section.
+- #44724: labzink confirmed system[1] identity diff via mitmproxy. Posted v1.6.2 update with opt-in fix instructions.
+- #41930: Replied to 2008sliu re: npm vs binary install + v2.1.100 status.
+- v2.1.100 shipped 05:00 UTC. Tested with v1.6.2 — interceptor works, CC scatter still present.
+
+### Completed (2026-04-10 morning)
 - #45572: Posted isClaudeAISubscriber() source analysis for odgriff79. First comment on the issue.
 - #44869: Posted cache bug root cause explanation and interceptor fix for talesmetal. First comment on the issue.
-- #43657: Countered simpolism's "fixed in 2.1.97" claim with v2.1.97 test data showing resume scatter still present.
+- #43657: Countered simpolism's "fixed in 2.1.97" claim with v2.1.97 test data showing resume scatter still present. Reopened by simpolism after our comment.
 - #45756: Posted to defend against bot auto-closure. Shared v1.6.1 quota tracking capability, validated molu0219's analysis.
 
 ### Completed (2026-04-09)
