@@ -162,10 +162,19 @@ function sortSkillsBlock(text) {
   const match = text.match(
     /^([\s\S]*?\n\n)(- [\s\S]+?)(\n<\/system-reminder>\s*)$/
   );
-  if (!match) return text;
+  if (!match) {
+    debugLog("SKILLS SORT: regex did NOT match — block passed through unsorted",
+      `(length=${text.length}, starts=${JSON.stringify(text.slice(0, 80))})`);
+    return text;
+  }
   const [, header, entriesText, footer] = match;
   const entries = entriesText.split(/\n(?=- )/);
+  const preSort = entries.map(e => (e.match(/^- ([^:]+)/) || [])[1] || "?");
   entries.sort();
+  const postSort = entries.map(e => (e.match(/^- ([^:]+)/) || [])[1] || "?");
+  const orderChanged = preSort.some((name, i) => name !== postSort[i]);
+  debugLog(`SKILLS SORT: ${entries.length} entries, order ${orderChanged ? "CHANGED" : "unchanged"}`,
+    `footer=${JSON.stringify(footer)}`);
   return header + entries.join("\n") + footer;
 }
 
@@ -267,7 +276,13 @@ function stripSessionKnowledge(text) {
  * prepends them to messages[0]. Idempotent across calls.
  */
 function normalizeResumeMessages(messages) {
-  if (!Array.isArray(messages) || messages.length < 2) return messages;
+  if (!Array.isArray(messages)) return messages;
+  // NOTE: We used to return early here for messages.length < 2 (fresh sessions)
+  // because there's nothing to relocate. But this left the first call's blocks
+  // in CC's raw, non-deterministic order. On call 2+, sorting/pinning would run
+  // and produce DIFFERENT bytes — busting cache on the first resume turn.
+  // Fix: always run sort+pin, even on single-message calls, so the first call
+  // establishes a deterministic baseline. (@bilby91 #44045)
 
   let firstUserIdx = -1;
   for (let i = 0; i < messages.length; i++) {
@@ -509,6 +524,7 @@ import { join } from "node:path";
 
 const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
 const PREFIXDIFF = process.env.CACHE_FIX_PREFIXDIFF === "1";
+const NORMALIZE_IDENTITY = process.env.CACHE_FIX_NORMALIZE_IDENTITY === "1";
 const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
 const SNAPSHOT_DIR = join(homedir(), ".claude", "cache-fix-snapshots");
 const USAGE_JSONL = process.env.CACHE_FIX_USAGE_LOG || join(homedir(), ".claude", "usage.jsonl");
@@ -831,6 +847,37 @@ globalThis.fetch = async function (url, options) {
           };
           modified = true;
           debugLog("APPLIED: fingerprint stabilized from", fix.oldFingerprint, "to", fix.stableFingerprint);
+        }
+      }
+
+      // Bug 6: Identity string normalization for Agent()/SendMessage() cache parity
+      // The CC orchestrator emits a different identity string in system[1] depending
+      // on whether the call originated from Agent() vs SendMessage() (subagent resume):
+      //   Agent():       "You are Claude Code, Anthropic's official CLI for Claude."
+      //   SendMessage(): "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+      // Both blocks carry cache_control: ephemeral. The ~50-char identity swap is enough
+      // to invalidate the entire cache prefix, producing cache_read=0 on first SendMessage
+      // turn even though system[2] (the actual instructions) is byte-identical.
+      // Confirmed by @labzink via mitmproxy on #44724.
+      // Opt-in because it's a model-perceivable behavior change (subagent thinks it's CC).
+      if (NORMALIZE_IDENTITY && payload.system && Array.isArray(payload.system)) {
+        const CANONICAL = "You are Claude Code, Anthropic's official CLI for Claude.";
+        const AGENT_SDK = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+        let normalized = 0;
+        payload.system = payload.system.map((block) => {
+          if (
+            block?.type === "text" &&
+            typeof block.text === "string" &&
+            block.text.startsWith(AGENT_SDK)
+          ) {
+            normalized++;
+            return { ...block, text: CANONICAL + block.text.slice(AGENT_SDK.length) };
+          }
+          return block;
+        });
+        if (normalized > 0) {
+          modified = true;
+          debugLog(`APPLIED: identity normalized on ${normalized} system block(s) (Agent SDK → Claude Code)`);
         }
       }
 
