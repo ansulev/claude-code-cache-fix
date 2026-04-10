@@ -80,7 +80,7 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | @jmarianski | MITM proxy + Ghidra reverse engineering of standalone binary. Multi-mode cache test script. |
 | @VictorSun92 | Original monkey-patch fix for v2.1.88, partial scatter detection on v2.1.90. |
 | @ArkNill | Systematic proxy-based analysis of 7 hidden bugs. Microcompact/budget/false-rate-limiter documentation. |
-| @bilby91 | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. Agent SDK user (API-billed). Tested interceptor — 1h TTL works, found 1-char tool diff unique to SDK. |
+| @bilby91 ([Crunchloop DAP](https://dap.crunchloop.ai)) | SDK-level reproduction of skill_listing block missing from messages[0] (#44045). Clean minimal repro. Agent SDK / DAP production user. Tested v1.5.1 (deferred tools fix) and v1.6.2 (fresh-session sort + identity normalization). First production team to merge the interceptor to trunk for team-wide deployment (2026-04-10). |
 | @Alpha2Zulu1872 | Persistent phantom billing on disabled keys, "API Usage Billing" header investigation (#41930). Active support ticket 215473797766657. |
 | @Sn3th | Comprehensive microcompact/context degradation documentation (#42542). Three clearing mechanisms identified. |
 | @kolkov | Source-code verified analysis of 3 regressions in session loading pipeline (#43044). |

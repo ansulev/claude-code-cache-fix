@@ -277,9 +277,14 @@ CACHE_FIX_PREFIXDIFF=1 claude-fixed
 - [#44045](https://github.com/anthropics/claude-code/issues/44045) — SDK 层面的复现与 token 测量
 - [#32508](https://github.com/anthropics/claude-code/issues/32508) — 关于 `Output efficiency` 系统提示词变更及其可能影响模型行为的社区讨论
 
+## 生产环境使用
+
+- **[Crunchloop DAP](https://dap.crunchloop.ai)** — Agent SDK / DAP 开发环境。首个将本拦截器合入 trunk 并团队级部署的生产团队（2026-04-10）。通过真实环境测试发现两类不同的缓存回归问题——工具排序抖动与 fresh-session 排序漏洞，并贡献了驱动 v1.5.1 与 v1.6.2 修复的调试日志。
+
 ## 贡献者
 
 - **[@VictorSun92](https://github.com/VictorSun92)** — 原始 v2.1.88 monkey-patch 修复作者，识别出 v2.1.90 中的部分块散布问题，并贡献了前向扫描检测、正确的块排序、更严格的块匹配器，以及可选的 output-efficiency 重写 hook
+- **[@bilby91](https://github.com/bilby91)** ([Crunchloop DAP](https://dap.crunchloop.ai)) — Agent SDK / DAP 生产环境验证、1h 缓存 TTL 确认、通过调试日志发现工具排序抖动（v1.5.1 修复）、通过 SKILLS SORT 诊断发现 fresh-session 排序 bug（v1.6.2 修复）。首个将本拦截器合入 trunk 的生产团队。
 - **[@jmarianski](https://github.com/jmarianski)** — 通过 MITM 代理抓包和 Ghidra 逆向分析定位根因，并提供多模式缓存测试脚本
 - **[@cnighswonger](https://github.com/cnighswonger)** — 指纹稳定化、工具顺序修复、图片剥离、监控功能、超额 TTL 降级发现，本包维护者
 - **[@ArkNill](https://github.com/ArkNill)** — 微压缩机制分析、GrowthBook 标志文档整理、虚假速率限制识别
