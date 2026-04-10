@@ -1,8 +1,6 @@
 # claude-code-cache-fix
 
-English | [中文](./README.zh.md)
-
-Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.97.
+Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.92.
 
 ## The problem
 
@@ -94,6 +92,90 @@ This keeps images in the last 3 user messages and replaces older ones with a tex
 
 Set to `0` (default) to disable.
 
+## System prompt rewrite (optional)
+
+The interceptor can also rewrite Claude Code's `# Output efficiency` system-prompt section before the request is sent.
+
+This feature is **optional** and **disabled by default**. If `CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT` is unset, nothing is changed.
+
+Enable it by setting a replacement text:
+
+```bash
+export CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT=$'# Output efficiency\n\n...'
+```
+
+The rewrite is intentionally narrow:
+
+- Only Claude Code's `# Output efficiency` section is replaced
+- Other system prompt sections are preserved
+- Existing system block structure and fields such as `cache_control` are preserved
+
+This may be useful for users who want to stay on current Claude Code versions but experiment with a different `Output efficiency` instruction set instead of downgrading to an earlier release.
+
+### Prompt variants
+
+<details>
+<summary>Anthropic internal / <code>USER_TYPE=ant</code> version</summary>
+
+```text
+# Output efficiency
+
+When sending user-facing text, you're writing for a person, not logging to a console. Assume users can't see most tool calls or thinking - only your text output. Before your first tool call, briefly state what you're about to do. While working, give short updates at key moments: when you find something load-bearing (a bug, a root cause), when changing direction, when you've made progress without an update.
+
+When you give updates, assume the recipient may have stepped away and lost the thread. They do not know your internal shorthand, codenames, or half-formed plan. Write in complete, grammatical sentences that can be understood cold. Spell out technical terms when helpful. If unsure, err on the side of a bit more explanation. Adapt to the user's expertise: experts can handle denser updates, but don't make novice users reconstruct context on their own.
+
+User-facing text should read like natural prose. Avoid clipped sentence fragments, excessive dashes, symbolic shorthand, or formatting that reads like console output. Use tables only when they genuinely improve scanability, such as compact facts (files, lines, pass/fail) or quantitative comparisons. Keep explanatory reasoning in prose around the table, not inside it. Avoid semantic backtracking: structure sentences so the user can follow them linearly without having to reinterpret earlier clauses after reading later ones.
+
+Optimize for fast human comprehension, not minimal surface area. If the user has to reread your summary or ask a follow-up just to understand what happened, you saved the wrong tokens. Match the level of structure to the task: for a simple question, answer in plain prose without unnecessary headings or numbered lists. While staying clear and direct, also be concise and avoid fluff. Skip filler, obvious restatements, and throat-clearing. Get to the point. Don't over-focus on low-signal details from your process. When it helps, use an inverted pyramid structure with the conclusion first and details later.
+
+These user-facing text instructions do not apply to code or tool calls.
+```
+
+</details>
+
+<details>
+<summary>Public / default Claude Code version</summary>
+
+```text
+# Output efficiency
+
+IMPORTANT: Go straight to the point. Try the simplest approach first without going in circles. Do not overdo it. Be extra concise.
+
+Your text output is brief, direct, and to the point. Lead with the answer or action, not the reasoning. Omit filler, preamble, and unnecessary transitions. Do not restate the user's request; move directly to the work. When explanation is needed, include only what helps the user understand the outcome.
+
+Prioritize user-facing text for:
+- decisions that require user input
+- high-signal progress updates at natural milestones
+- errors or blockers that change the plan
+
+If a sentence can do the job, do not turn it into three. Favor short, direct constructions over long explanatory prose. These instructions do not apply to code or tool calls.
+```
+
+</details>
+
+<details>
+<summary>Example custom replacement(A middle-ground version combining the two versions above)</summary>
+
+```text
+# Output efficiency
+
+When sending user-facing text, write for a person, not a log file. Assume the user cannot see most tool calls or hidden reasoning - only your text output.
+
+Keep user-facing text clear, direct, and reasonably concise. Lead with the answer or action. Skip filler, repetition, and unnecessary preamble.
+
+Explain enough for the user to understand the reasoning, tradeoffs, or root cause when that would help them learn or make a decision, but do not turn simple answers into long writeups.
+
+These instructions apply to user-facing text only. They do not apply to investigation, code reading, tool use, or verification.
+
+Before making changes, read the relevant code and understand the surrounding context. Check types, signatures, call sites, and error causes before editing. Do not confuse brevity with rushing, and do not replace understanding with trial and error.
+
+While working, give short updates at meaningful moments: when you find the root cause, when the plan changes, when you hit a blocker, or when a meaningful milestone is complete. Do not narrate every step.
+
+When reporting results, be accurate and concrete. If you did not verify something, say so plainly. If a check failed, say that plainly too.
+```
+
+</details>
+
 ## Monitoring
 
 The interceptor includes monitoring for several additional issues identified by the community:
@@ -146,6 +228,7 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `APPLIED: tool order stabilization` — tools were reordered
 - `APPLIED: fingerprint stabilized from XXX to YYY` — fingerprint was corrected
 - `APPLIED: stripped N images from old tool results` — images were stripped
+- `APPLIED: output efficiency section rewritten` — output-efficiency section was replaced
 - `MICROCOMPACT: N/M tool results cleared` — microcompact degradation detected
 - `BUDGET WARNING: tool result chars at N / 200,000 threshold` — approaching budget cap
 - `FALSE RATE LIMIT: synthetic model detected` — client-side false rate limit
@@ -154,6 +237,7 @@ Logs are written to `~/.claude/cache-fix-debug.log`. Look for:
 - `CACHE TTL: tier=1h create=N read=N hit=N% (1h=N 5m=N)` — TTL tier and cache hit rate per call
 - `PEAK HOUR: weekday 13:00-19:00 UTC` — Anthropic peak hour throttling active
 - `SKIPPED: resume relocation (not a resume or already correct)` — no fix needed
+- `SKIPPED: output efficiency rewrite (section not found)` — no matching output-efficiency section found
 
 ### Prefix diff mode
 
@@ -172,6 +256,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 | `CACHE_FIX_DEBUG` | `0` | Enable debug logging to `~/.claude/cache-fix-debug.log` |
 | `CACHE_FIX_PREFIXDIFF` | `0` | Enable prefix snapshot diffing |
 | `CACHE_FIX_IMAGE_KEEP_LAST` | `0` | Keep images in last N user messages (0 = disabled) |
+| `CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT` | unset | Replace Claude Code's `# Output efficiency` system-prompt section before the request is sent |
 | `CACHE_FIX_USAGE_LOG` | `~/.claude/usage.jsonl` | Path for per-call usage telemetry log |
 
 ## Limitations
@@ -179,6 +264,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 - **npm installation only** — The standalone Claude Code binary has Zig-level attestation that bypasses Node.js. This fix only works with the npm package (`npm install -g @anthropic-ai/claude-code`).
 - **Overage TTL downgrade** — Exceeding 100% of the 5-hour quota triggers a server-enforced TTL downgrade from 1h to 5m. This is a server-side decision and cannot be fixed client-side. The interceptor prevents the cache instability that can push you into overage in the first place.
 - **Microcompact is not preventable** — The monitoring features detect context degradation but cannot prevent it. The microcompact and budget enforcement mechanisms are server-controlled via GrowthBook flags with no client-side disable option.
+- **System prompt rewrite is experimental** — This hook only rewrites one system-prompt section and is opt-in, but there are still unknowns: it is not proven that this prompt text is responsible for the behavior differences discussed in community reports, and it is not known whether future server-side validation could react to modified system prompts. Use at your own risk.
 - **Version coupling** — The fingerprint salt and block detection heuristics are derived from Claude Code internals. A major refactor could require an update to this package.
 
 ## Tracked issues
@@ -189,6 +275,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 - [#43044](https://github.com/anthropics/claude-code/issues/43044) — Resume loads 0% context on v2.1.91
 - [#43657](https://github.com/anthropics/claude-code/issues/43657) — Resume cache invalidation confirmed on v2.1.92
 - [#44045](https://github.com/anthropics/claude-code/issues/44045) — SDK-level reproduction with token measurements
+- [#32508](https://github.com/anthropics/claude-code/issues/32508) — Community discussion around the `Output efficiency` system-prompt change and its possible effect on model behavior
 
 ## Related research
 
@@ -197,7 +284,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 
 ## Contributors
 
-- **[@VictorSun92](https://github.com/VictorSun92)** — Original monkey-patch fix for v2.1.88, identified partial scatter on v2.1.90, contributed forward-scan detection, correct block ordering, and tighter block matchers
+- **[@VictorSun92](https://github.com/VictorSun92)** — Original monkey-patch fix for v2.1.88, identified partial scatter on v2.1.90, contributed forward-scan detection, correct block ordering, tighter block matchers, and the optional output-efficiency rewrite hook
 - **[@jmarianski](https://github.com/jmarianski)** — Root cause analysis via MITM proxy capture and Ghidra reverse engineering, multi-mode cache test script
 - **[@cnighswonger](https://github.com/cnighswonger)** — Fingerprint stabilization, tool ordering fix, image stripping, monitoring features, overage TTL downgrade discovery, package maintainer
 - **[@ArkNill](https://github.com/ArkNill)** — Microcompact mechanism analysis, GrowthBook flag documentation, false rate limiter identification
