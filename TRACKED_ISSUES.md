@@ -53,6 +53,14 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | [#33949](https://github.com/anthropics/claude-code/issues/33949) | SSE streaming hangs indefinitely | Open | Root cause analysis with fix proposals. Affects session stability. |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | 59 compactions documented. Related to our memory/CLAUDE.md approach. |
 
+## NEW: v2.1.101 regression cluster (Apr 10 evening)
+
+| # | Title | State | Why it matters |
+|---|-------|-------|---------------|
+| [#46437](https://github.com/anthropics/claude-code/issues/46437) | Context window not set to 1M on Max despite Opus 4.6 | Open — Chris shut down git-bot autoclose + 👀 reaction (2026-04-10 evening) | Directly in our lane — 1M context allocation / plan-tier identification. Possibly the same capacity-rationing mechanism v2.1.78 introduced ("model dropdown no longer offers 1M context variant to subscribers whose plan tier is unknown"). Worth a close read in the morning. |
+| [#46444](https://github.com/anthropics/claude-code/issues/46444) | Worktree auto-cleanup permanently deleted 10 days of work | Open | Data-loss escalation. Windows-specific. Not in our lane but serious for filer. Monitor only. |
+| [#46445](https://github.com/anthropics/claude-code/issues/46445) | /continue and /resume showing cross-project sessions in 2.1.101 | Open | Session visibility regression — adjacent to our resume-path work but not a cache bug. Monitor. |
+
 ## NEW: Quota accounting / billing routing cluster (Apr 7-9)
 
 | # | Title | State | Why it matters |
@@ -69,6 +77,7 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 |----------|--------|-----------|
 | [claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis) | @ArkNill | 7 bugs: microcompact, budget caps, false rate limiter, JSONL duplication, extended thinking quota |
 | [X-Ray-Claude-Code-Interceptor](https://github.com/Renvect/X-Ray-Claude-Code-Interceptor) | @Renvect | HTTPS proxy with dashboard, system prompt diffing, per-tool stripping thresholds |
+| [claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard) | @fgrosswig | Self-hosted dashboard with SSE live monitoring, multi-host aggregation, forced-restart detection, compaction analysis, quadratic cost modeling. v1.4.0 shipped 2026-04-11. Reads from `~/.claude/projects/**/*.jsonl` + optional HTTP proxy. Complementary vantage point to our in-process interceptor. Includes `scripts/scrub-for-public.sh` for log sanitization before sharing. |
 
 ## Key People
 
@@ -91,6 +100,8 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | @molu0219 | Rigorous cache_read quota accounting analysis (#45756). Measured 103.9M raw tokens, hypothesized cache_read counts at full rate for quota. |
 | @triphase-physics | Max 20x billing routing bypass — 100% Extra Usage, subscription untouched (#45249). |
 | @odgriff79 | OAuth-only billing misclassification — CC treating Max as API billing (#45572). |
+| @fgrosswig ([claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard)) | Self-hosted forensic dashboard for Claude Code usage. v1.4.0 (2026-04-11) documented forced-session-restart mechanism (~490K tokens per event at quota cap), compaction cache wipe (78-91% cache destroyed at each compaction), and quadratic cost scaling (8-12x by turn 500+). Independent replication of forced-restart verified in our usage.jsonl. Includes scrub script for log sanitization. Complementary to our interceptor's vantage point. |
+| @Hisham-Hussein | Surfaced the v2.1.81 pin workaround on 2026-04-11 morning in #38335 — "pin to v2.1.81 for pre-March-23 behavior." Kicked off the cross-version investigation that produced the ScheduleWakeup 5m TTL finding and the March 23 server-side regression hypothesis. |
 
 ---
 
@@ -105,6 +116,15 @@ Users who have confirmed the interceptor resolved their issue:
 ---
 
 ## Issues needing our attention
+
+### Completed (2026-04-11 afternoon — March 23 regression investigation)
+- **Blog post published**: "The 5-Minute Baseline: What We Found in Claude Code's Tools Array" — https://veritassuperaitsolutions.com/5-minute-baseline-tools-array/ — standalone from the cache investigation series. Anchored on the ScheduleWakeup tool description confirming 5m TTL baseline from Anthropic's own product code.
+- **Cross-version investigation**: Installed v2.1.81, v2.1.83, v2.1.90, v2.1.101 side-by-side via `~/bin/cc-version` launcher. Dumped full tools array per version via `CACHE_FIX_DUMP_TOOLS=<path>` hook. Found: (a) v2.1.81→v2.1.83 client diff is ~500 chars of schema (not enough to explain quota drain), (b) v2.1.101 adds Monitor+ScheduleWakeup tools totaling 6,615 chars = ~1,700 extra prefix tokens per turn, (c) `ScheduleWakeup` description quotes 5m TTL as baseline and advises avoiding 300-1200s sleeps. Full investigation doc at `docs/march-23-regression-investigation.md`.
+- #38335: Posted cross-version measurement table, ScheduleWakeup quote, server-side hypothesis (regression not aligned with client release), and practical decision tree (pin v2.1.81 / interceptor / both). Directly tagged @dewtoricor1997-ship-it with request for per-turn token delta from their v2.1.81 downgrade test.
+- #42052: Posted ScheduleWakeup quote confirming TigerKay1926's "stuck 5m TTL" observation from Anthropic's own tooling side. Linked to blog for fuller context.
+
+### Completed (2026-04-11 morning)
+- #38335: Replied to @TheAuditorTool's cache_read discount removal theory with 500-call telemetry sample — 228M cache_read tokens tracking at discounted rate (8.8× ratio discounted vs full-rate). Flagged @dewtoricor1997's fresh-reset `/compact` costing 7% Q5h as worth independent confirmation. Distinguished API-level discount (still live) from Max quota divisor (unknown).
 
 ### Completed (2026-04-10 afternoon — v1.6.2 release)
 - **v1.6.2 shipped to npm.** Three changes:
