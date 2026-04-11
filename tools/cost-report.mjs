@@ -484,6 +484,12 @@ function printJsonReport(results, summary, ratesData, adminSummary) {
       total_cost: summary.totalCost,
       avg_cost_per_call: summary.totalCost / summary.calls,
       tokens: summary.totals,
+      cost_factor: (function () {
+        // fgrosswig-style overhead ratio: gross tokens / output tokens
+        const gross = summary.totals.input + summary.totals.output +
+                      summary.totals.cache_read + summary.totals.cache_1h + summary.totals.cache_5m;
+        return summary.totals.output > 0 ? gross / summary.totals.output : null;
+      })(),
       by_model: summary.byModel,
       degradation: summary.degradedCalls > 0 ? {
         degraded_calls: summary.degradedCalls,
@@ -544,6 +550,15 @@ function printMarkdownReport(results, summary, ratesData, adminSummary) {
   lines.push(`| Total cache write 5m | ${fmt(summary.totals.cache_5m)} |`);
   lines.push(`| **Total cost** | **${fmtCost(summary.totalCost)}** |`);
   lines.push(`| Avg cost per call | ${fmtCost(summary.totalCost / summary.calls)} |`);
+  {
+    // Cost factor: popularized by @fgrosswig's claude-usage-dashboard
+    // (https://github.com/fgrosswig/claude-usage-dashboard)
+    const grossTokens = summary.totals.input + summary.totals.output +
+                        summary.totals.cache_read + summary.totals.cache_1h + summary.totals.cache_5m;
+    if (summary.totals.output > 0) {
+      lines.push(`| Cost factor (tokens/output) | ${(grossTokens / summary.totals.output).toFixed(1)}× |`);
+    }
+  }
   lines.push('');
 
   // By model
@@ -679,6 +694,22 @@ function printTextReport(results, summary, ratesData, adminSummary) {
         console.log(`  Cache read savings:    ${fmtCost(saved)} (${(saved / summary.totalCost * 100).toFixed(1)}% of total)`);
       }
     }
+  }
+
+  // ── Cost factor (overhead ratio) ──
+  // Credit: this metric was popularized by @fgrosswig's claude-usage-dashboard
+  // (https://github.com/fgrosswig/claude-usage-dashboard). It divides total
+  // tokens processed (input + output + cache_read + cache_creation) by useful
+  // output tokens, giving a single-number "how much context am I carrying
+  // per useful word of output" multiplier. Values climb over long sessions
+  // due to resume/compaction cycles; a rising curve is a signal that cache
+  // efficiency is degrading.
+  const totalCacheCreate = summary.totals.cache_1h + summary.totals.cache_5m;
+  const grossTokens = summary.totals.input + summary.totals.output +
+                      summary.totals.cache_read + totalCacheCreate;
+  if (summary.totals.output > 0) {
+    const costFactor = grossTokens / summary.totals.output;
+    console.log(`  Cost factor:           ${costFactor.toFixed(1)}× (tokens/output)`);
   }
   console.log('');
 
