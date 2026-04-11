@@ -1085,6 +1085,25 @@ globalThis.fetch = async function (url, options) {
       const status = response.headers.get("anthropic-ratelimit-unified-status");
       const overage = response.headers.get("anthropic-ratelimit-unified-overage-status");
 
+      // Capture ALL anthropic-* and request-id/cf-ray response headers.
+      // Pattern borrowed from @fgrosswig's claude-usage-dashboard proxy:
+      //   https://github.com/fgrosswig/claude-usage-dashboard
+      // Widening beyond the specific unified-ratelimit headers above future-proofs
+      // us against Anthropic adding new headers (e.g. experimental rollout flags,
+      // region hints, new quota dimensions) without needing code changes.
+      const allAnthropicHeaders = {};
+      for (const [name, value] of response.headers.entries()) {
+        const lower = name.toLowerCase();
+        if (
+          lower.startsWith("anthropic-") ||
+          lower === "request-id" ||
+          lower === "x-request-id" ||
+          lower === "cf-ray"
+        ) {
+          allAnthropicHeaders[lower] = value;
+        }
+      }
+
       if (h5 || h7d) {
         const quotaFile = join(homedir(), ".claude", "quota-status.json");
         let quota = {};
@@ -1094,6 +1113,7 @@ globalThis.fetch = async function (url, options) {
         quota.seven_day = h7d ? { utilization: parseFloat(h7d), pct: Math.round(parseFloat(h7d) * 100), resets_at: reset7d ? parseInt(reset7d) : null } : quota.seven_day;
         quota.status = status || null;
         quota.overage_status = overage || null;
+        quota.all_headers = allAnthropicHeaders;
 
         // Peak hour detection — Anthropic applies higher quota drain rate during
         // weekday peak hours: 13:00–19:00 UTC (Mon–Fri).
