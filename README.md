@@ -303,6 +303,51 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 
 - **[@ArkNill/claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis)** — Systematic proxy-based analysis of 7 bugs including microcompact, budget enforcement, false rate limiter, and extended thinking quota impact. The monitoring features in v1.1.0 are informed by this research.
 - **[@Renvect/X-Ray-Claude-Code-Interceptor](https://github.com/Renvect/X-Ray-Claude-Code-Interceptor)** — Diagnostic HTTPS proxy with real-time dashboard, system prompt section diffing, per-tool stripping thresholds, and multi-stream JSONL logging. Works with any Claude client that supports `ANTHROPIC_BASE_URL` (CLI, VS Code extension, desktop app), complementing this package's CLI-only `NODE_OPTIONS` approach.
+- **[@fgrosswig/claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard)** — Self-hosted forensic dashboard with SSE live monitoring, multi-host aggregation, cache-health scoring, and forced-restart/compaction detection. Reads from Claude Code's native session JSONL files and optionally from an HTTP proxy NDJSON stream. v1.4.0 documented the forced-session-restart mechanism at quota-cap boundaries (~490K tokens per event) and the 78–91% cache-wipe pattern at compaction events. Complementary to our interceptor's in-process vantage point. See [Works with @fgrosswig's dashboard](#works-with-fgrosswigs-dashboard) below for the interop pattern.
+
+## Works with @fgrosswig's dashboard
+
+This interceptor and [@fgrosswig](https://github.com/fgrosswig)'s
+[claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard)
+solve strongly complementary problems. The interceptor captures per-call API
+data from inside the Node.js process — cache metrics, quota state, TTL tier,
+rewrites applied. The dashboard provides the visualization layer — historical
+trending, per-day charts, multi-host aggregation, cache-health scoring.
+
+Running both gives you the best of both tools, and the integration is a
+one-liner thanks to the dashboard's tolerant NDJSON ingest and our new
+`usage-to-dashboard-ndjson` translator.
+
+### Quick setup
+
+```bash
+# Install both tools
+npm install -g claude-code-cache-fix
+# (follow fgrosswig's dashboard install: https://github.com/fgrosswig/claude-usage-dashboard)
+
+# One-shot translation (reads ~/.claude/usage.jsonl, writes to
+# ~/.claude/anthropic-proxy-logs/proxy-YYYY-MM-DD.ndjson, which his
+# dashboard already watches)
+node $(npm root -g)/claude-code-cache-fix/tools/usage-to-dashboard-ndjson.mjs
+
+# Or keep it live-updating as the interceptor logs new calls
+node $(npm root -g)/claude-code-cache-fix/tools/usage-to-dashboard-ndjson.mjs --follow &
+```
+
+No configuration required on the dashboard side — fgrosswig's
+`collectProxyNdjsonFiles()` auto-discovers files in
+`~/.claude/anthropic-proxy-logs/` (or `$ANTHROPIC_PROXY_LOG_DIR`), and our
+translator writes to exactly that path with the expected `proxy-YYYY-MM-DD.ndjson`
+filename convention. The dashboard's tolerant ingestion layer ignores unknown
+fields, so interceptor-specific extras (`ttl_tier`, `ephemeral_1h_input_tokens`,
+`ephemeral_5m_input_tokens`, `peak_hour`, quota state) pass through cleanly
+and remain available to downstream consumers that know to read them.
+
+The `cost_factor` metric in `tools/cost-report.mjs` also comes from
+fgrosswig's methodology — the `(input + output + cache_read + cache_creation) / output`
+ratio that gives a single-number measure of how much context is being paid
+per useful output token. A rising cost factor across a long session is the
+measurable signature of cache-efficiency degradation.
 
 ## Used in production
 
@@ -316,6 +361,7 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 - **[@cnighswonger](https://github.com/cnighswonger)** — Fingerprint stabilization, tool ordering fix, image stripping, monitoring features, overage TTL downgrade discovery, package maintainer
 - **[@ArkNill](https://github.com/ArkNill)** — Microcompact mechanism analysis, GrowthBook flag documentation, false rate limiter identification
 - **[@Renvect](https://github.com/Renvect)** — Image duplication discovery, cross-project directory contamination analysis
+- **[@fgrosswig](https://github.com/fgrosswig)** — [claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard) forensic methodology: cost-factor overhead ratio metric, `anthropic-*` header capture pattern, proxy NDJSON schema that informed our dashboard interop layer
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 
