@@ -1009,6 +1009,30 @@ globalThis.fetch = async function (url, options) {
         monitorContextDegradation(payload.messages);
       }
 
+      // Diagnostic: dump full tools array (names, descriptions, schemas, sizes) to a file
+      // when CACHE_FIX_DUMP_TOOLS=<path> is set. Useful for per-version tool-schema drift
+      // analysis and for understanding which tools contribute prefix bloat. First used
+      // during the 2026-04-11 cross-version regression investigation.
+      if (process.env.CACHE_FIX_DUMP_TOOLS && payload.tools) {
+        try {
+          const dumpPath = process.env.CACHE_FIX_DUMP_TOOLS;
+          const dump = {
+            timestamp: new Date().toISOString(),
+            tool_count: payload.tools.length,
+            tools: payload.tools.map(t => ({
+              name: t.name,
+              description: t.description || "",
+              desc_chars: (t.description || "").length,
+              schema_chars: JSON.stringify(t.input_schema || {}).length,
+              total_chars: JSON.stringify(t).length,
+            })),
+            system_chars: JSON.stringify(payload.system || "").length,
+            total_tools_chars: JSON.stringify(payload.tools).length,
+          };
+          writeFileSync(dumpPath, JSON.stringify(dump, null, 2));
+        } catch (e) { debugLog("DUMP ERROR:", e?.message); }
+      }
+
       // Prompt size measurement — log system prompt, tools, and injected block sizes
       if (DEBUG && payload.system && payload.tools && payload.messages) {
         const sysChars = JSON.stringify(payload.system).length;
