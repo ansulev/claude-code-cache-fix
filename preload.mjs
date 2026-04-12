@@ -790,6 +790,59 @@ function dumpGrowthBookFlags() {
 }
 
 // --------------------------------------------------------------------------
+// Startup health status line
+// --------------------------------------------------------------------------
+
+let _healthLinePrinted = false;
+
+function _formatTimeSince(isoString) {
+  if (!isoString) return "never";
+  const ms = Date.now() - new Date(isoString).getTime();
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  const mins = Math.floor(ms / (1000 * 60));
+  return `${mins}m ago`;
+}
+
+function _formatFixStatus(fixName, fixStats, dormantThreshold = 5) {
+  if (fixName === "relocate") {
+    if (fixStats.resumeScanned >= dormantThreshold && fixStats.bugPresent === 0) {
+      return `dormant(${fixStats.resumeScanned} clean sessions)`;
+    }
+  } else {
+    if (fixStats.skipped >= dormantThreshold && fixStats.applied === 0) {
+      return `dormant(${fixStats.skipped} skips)`;
+    }
+  }
+  if (fixStats.safetyBlocked > 0) return `safety-blocked(${fixStats.safetyBlocked}x)`;
+  if (fixStats.lastApplied) return `active(${_formatTimeSince(fixStats.lastApplied)})`;
+  return "waiting";
+}
+
+function printHealthLine() {
+  if (_healthLinePrinted) return;
+  _healthLinePrinted = true;
+  const stats = readStats();
+  const parts = [];
+  for (const [name, fixStats] of Object.entries(stats.fixes)) {
+    const status = _formatFixStatus(name, fixStats);
+    parts.push(`${name}=${status}`);
+    if (status.startsWith("dormant")) {
+      debugLog(`DORMANT: ${name} — CC may have fixed this. Consider CACHE_FIX_SKIP_${name.toUpperCase()}=1`);
+    }
+    if (status.startsWith("safety-blocked")) {
+      debugLog(`SAFETY: ${name} — salt/indices may have changed. Fix is auto-disabled.`);
+    }
+  }
+  debugLog(`HEALTH: ${parts.join(" ")}`);
+  if (FIXES_DISABLED) {
+    debugLog("HEALTH: all fixes disabled via CACHE_FIX_DISABLED=1 (monitoring active)");
+  }
+}
+
+// --------------------------------------------------------------------------
 // Microcompact / budget monitoring
 // --------------------------------------------------------------------------
 
@@ -1000,6 +1053,7 @@ globalThis.fetch = async function (url, options) {
 
       // One-time GrowthBook flag dump on first API call
       dumpGrowthBookFlags();
+      printHealthLine();
 
       if (FIXES_DISABLED) {
         debugLog("CACHE_FIX_DISABLED=1 — all bug fixes bypassed, monitoring active");
