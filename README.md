@@ -70,6 +70,31 @@ NODE_OPTIONS="--import claude-code-cache-fix" claude
 
 > **Note**: This only works if `claude` points to the npm/Node installation. The standalone binary uses a different execution path that bypasses Node.js preloads.
 
+### Windows users
+
+On Windows, `NODE_OPTIONS="--import ..."` doesn't work the same way as on Linux/macOS. Use the included `claude-fixed.bat` wrapper instead:
+
+1. After installing both packages globally:
+   ```bat
+   npm install -g claude-code-cache-fix
+   npm install -g @anthropic-ai/claude-code
+   ```
+
+2. Copy `claude-fixed.bat` from this package to a directory in your PATH (e.g., `C:\Users\<you>\bin\`):
+   ```bat
+   copy "%NPM_ROOT%\claude-code-cache-fix\claude-fixed.bat" C:\Users\%USERNAME%\bin\
+   ```
+   Or find the file manually at your npm global root (run `npm root -g` to locate it).
+
+3. Run Claude Code with the interceptor active:
+   ```bat
+   claude-fixed [any claude args...]
+   ```
+
+The wrapper dynamically resolves your npm global root, constructs a `file:///` URL for the preload module (converting backslashes to forward slashes for Node.js), and launches Claude Code with the interceptor loaded. All environment variables (`CACHE_FIX_DEBUG`, `CACHE_FIX_IMAGE_KEEP_LAST`, etc.) work the same as on Linux/macOS.
+
+Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335) contributed the Windows wrapper and validated the interceptor across a 7.5-hour, 536-call Opus 4.6 session on Windows — 98.4% cache hit rate, 81% of calls had fingerprint instability that the interceptor corrected.
+
 ## How it works
 
 The module intercepts `globalThis.fetch` before Claude Code makes API calls to `/v1/messages`. On each call it:
@@ -362,6 +387,7 @@ measurable signature of cache-efficiency degradation.
 - **[@ArkNill](https://github.com/ArkNill)** — Microcompact mechanism analysis, GrowthBook flag documentation, false rate limiter identification
 - **[@Renvect](https://github.com/Renvect)** — Image duplication discovery, cross-project directory contamination analysis
 - **[@fgrosswig](https://github.com/fgrosswig)** — [claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard) forensic methodology: cost-factor overhead ratio metric, `anthropic-*` header capture pattern, proxy NDJSON schema that informed our dashboard interop layer
+- **[@TomTheMenace](https://github.com/TomTheMenace)** — Windows `.bat` wrapper for the interceptor, first Windows platform validation (7.5h/536-call Opus 4.6 session, 98.4% cache hit rate, 81% fingerprint instability corrected)
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 

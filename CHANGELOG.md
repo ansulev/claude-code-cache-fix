@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.7.1 (2026-04-12)
+
+- **Windows support** — Added `claude-fixed.bat` wrapper for Windows users where `NODE_OPTIONS="--import ..."` doesn't work. Dynamically resolves npm global root, constructs `file:///` URL with forward-slash conversion, launches Claude Code with the interceptor active. Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335).
+- **README: Windows setup guide** — Step-by-step instructions for Windows users alongside the existing Linux/macOS wrapper, alias, and direct-invocation options.
+- **Contributors: @TomTheMenace** — First Windows platform validation: 7.5-hour, 536-call Opus 4.6 session with 98.4% cache hit rate. 81% of calls had fingerprint instability corrected by the interceptor. Contributed the `.bat` wrapper.
+
 ## 1.7.0 (2026-04-11)
 
 Investigation release — cross-version regression analysis, interop with @fgrosswig's claude-usage-dashboard, and diagnostic tooling for per-version tool-schema drift.

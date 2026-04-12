@@ -1,13 +1,14 @@
 {
   "name": "claude-code-cache-fix",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Fixes prompt cache regression in Claude Code that causes up to 20x cost increase on resumed sessions",
   "type": "module",
   "exports": "./preload.mjs",
   "main": "./preload.mjs",
   "files": [
     "preload.mjs",
-    "tools/"
+    "tools/",
+    "claude-fixed.bat"
   ],
   "engines": {
     "node": ">=18"

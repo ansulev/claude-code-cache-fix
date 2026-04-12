@@ -78,6 +78,7 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | [claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis) | @ArkNill | 7 bugs: microcompact, budget caps, false rate limiter, JSONL duplication, extended thinking quota |
 | [X-Ray-Claude-Code-Interceptor](https://github.com/Renvect/X-Ray-Claude-Code-Interceptor) | @Renvect | HTTPS proxy with dashboard, system prompt diffing, per-tool stripping thresholds |
 | [claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard) | @fgrosswig | Self-hosted dashboard with SSE live monitoring, multi-host aggregation, forced-restart detection, compaction analysis, quadratic cost modeling. v1.4.0 shipped 2026-04-11. Reads from `~/.claude/projects/**/*.jsonl` + optional HTTP proxy. Complementary vantage point to our in-process interceptor. Includes `scripts/scrub-for-public.sh` for log sanitization before sharing. |
+| [NEXO Brain](https://github.com/wazionapps/nexo) | @wazionapps | MCP-based "shared brain" for AI agents. Persistent memory, semantic RAG, natural forgetting, metacognitive guard, trust scoring, 150+ MCP tools. Works with Claude Code, Codex, Claude Desktop & any MCP client. 100% local, open source, npm `nexo-brain`. **License: AGPL-3.0** — safe to reference the architecture but deep integration contaminates downstream code. Benchmarked on LoCoMo (F1 0.588, +55% vs GPT-4). Adjacent to the "curated brain" concept in `project_curated_brain.md` memory but from a different angle (passive accumulation vs. deliberate curation). Monday-queue item: ship a `claude-meter → NEXO` data exporter since we produce structured per-call telemetry that NEXO can ingest for free without touching their AGPL code. |
 
 ## Key People
 
@@ -116,6 +117,13 @@ Users who have confirmed the interceptor resolved their issue:
 ---
 
 ## Issues needing our attention
+
+### Completed (2026-04-12 morning — Sunday check-in)
+- #38335: Replied to @ssougnez with v2.1.81 pin instructions + interceptor recommendation + soft ask for fallback-percentage data contribution.
+- #38335: @dewtoricor1997-ship-it posted **first independent replication of v2.1.81 pin on Max 20x** — "reached ONLY 10% of my weekly quota vs 30% on v2.1.83+, approximately 3-4× improvement." Strongest community validation datum to date. Held acknowledgment for Monday Part 2 bundle.
+- #38335: @Codename-404 reported +51% Q5h in 20 min of idle + 8% Q7d spike on Max $100, not peak hours. Textbook TTL-downgrade-at-cap behavior per our Layer 2 model.
+- #41930: @elvisskensberg reported "weekly reset should have been 0% but woke up at 75%." Max $200. Possible Layer 3 sticky variant or carry-over mechanism. Monitoring.
+- npm downloads: Apr 11 = 202 (down from 489 on Apr 10). Likely Saturday effect; waiting for Monday data before interpreting.
 
 ### Completed (2026-04-11 afternoon — March 23 regression investigation)
 - **Blog post published**: "The 5-Minute Baseline: What We Found in Claude Code's Tools Array" — https://veritassuperaitsolutions.com/5-minute-baseline-tools-array/ — standalone from the cache investigation series. Anchored on the ScheduleWakeup tool description confirming 5m TTL baseline from Anthropic's own product code.
