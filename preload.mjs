@@ -623,7 +623,7 @@ function replaceOutputEfficiencySection(text) {
 // Set CACHE_FIX_DEBUG=1 to enable
 // --------------------------------------------------------------------------
 
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -657,6 +657,84 @@ function shouldApplyFix(fixName) {
   const skipKey = `CACHE_FIX_SKIP_${fixName.toUpperCase()}`;
   if (process.env[skipKey] === "1") return false;
   return true;
+}
+
+// --------------------------------------------------------------------------
+// Persistent effectiveness stats
+// --------------------------------------------------------------------------
+
+const STATS_PATH = join(homedir(), ".claude", "cache-fix-stats.json");
+
+const _STATS_SCHEMA = {
+  relocate: { applied: 0, skipped: 0, bugPresent: 0, resumeScanned: 0, lastApplied: null, lastScanned: null },
+  fingerprint: { applied: 0, skipped: 0, safetyBlocked: 0, lastApplied: null },
+  tool_sort: { applied: 0, skipped: 0, lastApplied: null },
+  ttl: { applied: 0, skipped: 0, lastApplied: null },
+  identity: { applied: 0, skipped: 0, lastApplied: null },
+};
+
+function _createEmptyStats() {
+  return {
+    version: 1,
+    created: new Date().toISOString(),
+    lastUpdated: null,
+    fixes: JSON.parse(JSON.stringify(_STATS_SCHEMA)),
+  };
+}
+
+/** Read stats from disk. Returns empty stats on any error. */
+function readStats() {
+  try {
+    const data = JSON.parse(readFileSync(STATS_PATH, "utf8"));
+    if (data.created) {
+      const ageDays = (Date.now() - new Date(data.created).getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > 30) return _createEmptyStats();
+    }
+    for (const [key, schema] of Object.entries(_STATS_SCHEMA)) {
+      if (!data.fixes[key]) data.fixes[key] = { ...schema };
+    }
+    return data;
+  } catch {
+    return _createEmptyStats();
+  }
+}
+
+/** Atomic write: temp file + rename to avoid corruption. */
+function writeStats(stats) {
+  try {
+    stats.lastUpdated = new Date().toISOString();
+    const tmp = STATS_PATH + ".tmp";
+    writeFileSync(tmp, JSON.stringify(stats, null, 2));
+    renameSync(tmp, STATS_PATH);
+  } catch (e) {
+    debugLog("STATS WRITE ERROR:", e?.message);
+  }
+}
+
+function recordFixResult(fixName, result) {
+  const stats = readStats();
+  if (!stats.fixes[fixName]) return;
+  const now = new Date().toISOString();
+  stats.lastUpdated = now;
+  if (result === "applied") {
+    stats.fixes[fixName].applied++;
+    stats.fixes[fixName].lastApplied = now;
+  } else if (result === "skipped") {
+    stats.fixes[fixName].skipped++;
+  } else if (result === "safety_blocked") {
+    stats.fixes[fixName].safetyBlocked = (stats.fixes[fixName].safetyBlocked || 0) + 1;
+  }
+  writeStats(stats);
+}
+
+function recordRelocateScan(bugFound) {
+  const stats = readStats();
+  const now = new Date().toISOString();
+  stats.lastUpdated = now;
+  stats.fixes.relocate.resumeScanned++;
+  stats.fixes.relocate.lastScanned = now;
+  if (bugFound) stats.fixes.relocate.bugPresent++;
+  writeStats(stats);
 }
 
 // --------------------------------------------------------------------------
@@ -856,6 +934,50 @@ function snapshotPrefix(payload) {
 }
 
 // --------------------------------------------------------------------------
+// Cache regression detector
+// --------------------------------------------------------------------------
+
+const _cacheHistory = []; // in-memory ring buffer of { ratio, turn }
+const REGRESSION_MIN_CALLS = 5;
+const REGRESSION_MIN_RATIO = 0.5;
+let _apiCallCount = 0;
+
+function _computeCacheRatio(usage) {
+  if (!usage) return null;
+  const read = usage.cache_read_input_tokens || 0;
+  const creation = usage.cache_creation_input_tokens || 0;
+  const input = usage.input_tokens || 0;
+  const total = read + creation + input;
+  if (total === 0) return null;
+  return read / total;
+}
+
+function _checkCacheRegression() {
+  if (_cacheHistory.length < REGRESSION_MIN_CALLS) return;
+  const recent = _cacheHistory.slice(-REGRESSION_MIN_CALLS);
+  const allLow = recent.every((h) => h.ratio < REGRESSION_MIN_RATIO);
+  if (allLow) {
+    const avgRatio = recent.reduce((sum, h) => sum + h.ratio, 0) / recent.length;
+    debugLog(
+      `REGRESSION WARNING: cache_read ratio averaged ${Math.round(avgRatio * 100)}%`,
+      `across last ${REGRESSION_MIN_CALLS} calls (threshold: ${REGRESSION_MIN_RATIO * 100}%).`,
+      FIXES_DISABLED
+        ? "Fixes are disabled — consider re-enabling to recover cache performance."
+        : "Fixes are active but cache is still degraded — CC may have introduced a new bug."
+    );
+  }
+}
+
+function _trackCacheRatio(usage) {
+  if (_apiCallCount <= 1) return; // skip first call (cache creation, no reads)
+  const ratio = _computeCacheRatio(usage);
+  if (ratio === null) return;
+  _cacheHistory.push({ ratio, turn: _apiCallCount });
+  if (_cacheHistory.length > 20) _cacheHistory.shift(); // ring buffer
+  _checkCacheRegression();
+}
+
+// --------------------------------------------------------------------------
 // Fetch interceptor
 // --------------------------------------------------------------------------
 
@@ -871,6 +993,7 @@ globalThis.fetch = async function (url, options) {
 
   if (isMessagesEndpoint && options?.body && typeof options.body === "string") {
     try {
+      _apiCallCount++;
       const payload = JSON.parse(options.body);
       let modified = false;
 
@@ -926,12 +1049,18 @@ globalThis.fetch = async function (url, options) {
         }
 
         const normalized = normalizeResumeMessages(payload.messages);
+        // Track bug presence for dormancy detection (resume = messages > 5)
+        const isResume = payload.messages.length > 5;
+        if (isResume) recordRelocateScan(normalized !== payload.messages);
+
         if (normalized !== payload.messages) {
           payload.messages = normalized;
           modified = true;
           debugLog("APPLIED: resume message relocation");
+          recordFixResult("relocate", "applied");
         } else {
           debugLog("SKIPPED: resume relocation (not a resume or already correct)");
+          recordFixResult("relocate", "skipped");
         }
       } else if (payload.messages && !shouldApplyFix("relocate")) {
         debugLog("SKIPPED: relocate fix disabled via env var");
@@ -964,6 +1093,9 @@ globalThis.fetch = async function (url, options) {
           payload.tools = sorted;
           modified = true;
           debugLog("APPLIED: tool order stabilization");
+          recordFixResult("tool_sort", "applied");
+        } else {
+          recordFixResult("tool_sort", "skipped");
         }
       } else if (payload.tools && !shouldApplyFix("tool_sort")) {
         debugLog("SKIPPED: tool sort fix disabled via env var");
@@ -980,6 +1112,9 @@ globalThis.fetch = async function (url, options) {
           };
           modified = true;
           debugLog("APPLIED: fingerprint stabilized from", fix.oldFingerprint, "to", fix.stableFingerprint);
+          recordFixResult("fingerprint", "applied");
+        } else {
+          recordFixResult("fingerprint", "skipped");
         }
       } else if (payload.system && payload.messages && !shouldApplyFix("fingerprint")) {
         debugLog("SKIPPED: fingerprint fix disabled via env var");
@@ -1013,6 +1148,9 @@ globalThis.fetch = async function (url, options) {
         if (normalized > 0) {
           modified = true;
           debugLog(`APPLIED: identity normalized on ${normalized} system block(s) (Agent SDK → Claude Code)`);
+          recordFixResult("identity", "applied");
+        } else {
+          recordFixResult("identity", "skipped");
         }
       }
 
@@ -1060,6 +1198,9 @@ globalThis.fetch = async function (url, options) {
         if (ttlInjected > 0) {
           modified = true;
           debugLog(`APPLIED: 1h TTL injected on ${ttlInjected} cache_control block(s)`);
+          recordFixResult("ttl", "applied");
+        } else {
+          recordFixResult("ttl", "skipped");
         }
       } else if (payload.system && !shouldApplyFix("ttl")) {
         debugLog("SKIPPED: TTL injection disabled via env var");
@@ -1265,6 +1406,7 @@ async function drainTTLFromClone(clone, model, quotaHeaders) {
           if (event.type === "message_start" && event.message?.usage) {
             const u = event.message.usage;
             startUsage = u;
+            _trackCacheRatio(u);
             const cc = u.cache_creation || {};
             const e1h = cc.ephemeral_1h_input_tokens ?? 0;
             const e5m = cc.ephemeral_5m_input_tokens ?? 0;
