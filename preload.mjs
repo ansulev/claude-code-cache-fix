@@ -138,6 +138,7 @@ function stabilizeFingerprint(system, messages) {
       `CC sent '${oldFingerprint}', we computed '${verification}'.`,
       "Salt/indices may have changed in this CC version. Skipping rewrite."
     );
+    recordFixResult("fingerprint", "safety_blocked");
     return null;
   }
   // --- END SAFETY ---
