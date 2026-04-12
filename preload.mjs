@@ -84,6 +84,25 @@ function extractRealUserMessageText(messages) {
 }
 
 /**
+ * Extract text from messages[0] the way CC's original fingerprint code does —
+ * including meta/attachment blocks. Used only for round-trip verification.
+ */
+function extractFirstMessageText(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return "";
+  const first = messages[0];
+  if (!first || first.role !== "user") return "";
+  const content = first.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  for (const block of content) {
+    if (block.type === "text" && typeof block.text === "string") {
+      return block.text;
+    }
+  }
+  return "";
+}
+
+/**
  * Extract current cc_version from system prompt blocks and recompute with
  * stable fingerprint. Returns { oldVersion, newVersion, stableFingerprint }.
  */
@@ -106,6 +125,22 @@ function stabilizeFingerprint(system, messages) {
 
   const baseVersion = dotParts.slice(0, 3).join("."); // "2.1.87"
   const oldFingerprint = dotParts[3]; // "a3f"
+
+  // --- SAFETY: Round-trip verification ---
+  // Verify our salt/indices reproduce CC's fingerprint for the ORIGINAL
+  // message text (messages[0] content, which is what CC used).
+  // If our computation doesn't match, our constants are stale — skip rewrite.
+  const originalText = extractFirstMessageText(messages);
+  const verification = computeFingerprint(originalText, baseVersion);
+  if (verification !== oldFingerprint) {
+    debugLog(
+      "FINGERPRINT SAFETY: round-trip verification failed.",
+      `CC sent '${oldFingerprint}', we computed '${verification}'.`,
+      "Salt/indices may have changed in this CC version. Skipping rewrite."
+    );
+    return null;
+  }
+  // --- END SAFETY ---
 
   // Compute stable fingerprint from real user text
   const realText = extractRealUserMessageText(messages);
@@ -606,6 +641,25 @@ function debugLog(...args) {
 }
 
 // --------------------------------------------------------------------------
+// Kill switches — disable fixes while keeping monitoring active
+// --------------------------------------------------------------------------
+
+const FIXES_DISABLED = process.env.CACHE_FIX_DISABLED === "1";
+
+/**
+ * Check if a specific fix should be applied.
+ * Returns false if master kill switch is on OR individual fix is skipped.
+ * Monitoring and optimizations (image strip, output efficiency) are NOT
+ * affected by CACHE_FIX_DISABLED — only bug fixes are.
+ */
+function shouldApplyFix(fixName) {
+  if (FIXES_DISABLED) return false;
+  const skipKey = `CACHE_FIX_SKIP_${fixName.toUpperCase()}`;
+  if (process.env[skipKey] === "1") return false;
+  return true;
+}
+
+// --------------------------------------------------------------------------
 // Prefix snapshot — captures message prefix for cross-process diff.
 // Set CACHE_FIX_PREFIXDIFF=1 to enable.
 //
@@ -823,6 +877,10 @@ globalThis.fetch = async function (url, options) {
       // One-time GrowthBook flag dump on first API call
       dumpGrowthBookFlags();
 
+      if (FIXES_DISABLED) {
+        debugLog("CACHE_FIX_DISABLED=1 — all bug fixes bypassed, monitoring active");
+      }
+
       debugLog("--- API call to", urlStr);
       debugLog("message count:", payload.messages?.length);
 
@@ -832,7 +890,7 @@ globalThis.fetch = async function (url, options) {
       }
 
       // Bug 1: Relocate resume attachment blocks
-      if (payload.messages) {
+      if (payload.messages && shouldApplyFix("relocate")) {
         // Log message structure for debugging
         if (DEBUG) {
           let firstUserIdx = -1, lastUserIdx = -1;
@@ -875,6 +933,8 @@ globalThis.fetch = async function (url, options) {
         } else {
           debugLog("SKIPPED: resume relocation (not a resume or already correct)");
         }
+      } else if (payload.messages && !shouldApplyFix("relocate")) {
+        debugLog("SKIPPED: relocate fix disabled via env var");
       }
 
       // Image stripping: remove old tool_result images to reduce token waste
@@ -895,7 +955,7 @@ globalThis.fetch = async function (url, options) {
       }
 
       // Bug 2a: Stabilize tool ordering
-      if (payload.tools) {
+      if (payload.tools && shouldApplyFix("tool_sort")) {
         const sorted = stabilizeToolOrder(payload.tools);
         const changed = sorted.some(
           (t, i) => t.name !== payload.tools[i]?.name
@@ -905,10 +965,12 @@ globalThis.fetch = async function (url, options) {
           modified = true;
           debugLog("APPLIED: tool order stabilization");
         }
+      } else if (payload.tools && !shouldApplyFix("tool_sort")) {
+        debugLog("SKIPPED: tool sort fix disabled via env var");
       }
 
       // Bug 2b: Stabilize fingerprint in attribution header
-      if (payload.system && payload.messages) {
+      if (payload.system && payload.messages && shouldApplyFix("fingerprint")) {
         const fix = stabilizeFingerprint(payload.system, payload.messages);
         if (fix) {
           payload.system = [...payload.system];
@@ -919,6 +981,8 @@ globalThis.fetch = async function (url, options) {
           modified = true;
           debugLog("APPLIED: fingerprint stabilized from", fix.oldFingerprint, "to", fix.stableFingerprint);
         }
+      } else if (payload.system && payload.messages && !shouldApplyFix("fingerprint")) {
+        debugLog("SKIPPED: fingerprint fix disabled via env var");
       }
 
       // Bug 6: Identity string normalization for Agent()/SendMessage() cache parity
@@ -931,7 +995,7 @@ globalThis.fetch = async function (url, options) {
       // turn even though system[2] (the actual instructions) is byte-identical.
       // Confirmed by @labzink via mitmproxy on #44724.
       // Opt-in because it's a model-perceivable behavior change (subagent thinks it's CC).
-      if (NORMALIZE_IDENTITY && payload.system && Array.isArray(payload.system)) {
+      if (NORMALIZE_IDENTITY && shouldApplyFix("identity") && payload.system && Array.isArray(payload.system)) {
         const CANONICAL = "You are Claude Code, Anthropic's official CLI for Claude.";
         const AGENT_SDK = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
         let normalized = 0;
@@ -971,7 +1035,7 @@ globalThis.fetch = async function (url, options) {
       // send cache_control without ttl (defaulting to 5m server-side).
       // The server honors whatever TTL the client requests — so we inject it.
       // Discovered by @TigerKay1926 on #42052 using our GrowthBook flag dump.
-      if (payload.system) {
+      if (payload.system && shouldApplyFix("ttl")) {
         let ttlInjected = 0;
         payload.system = payload.system.map((block) => {
           if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
@@ -997,6 +1061,8 @@ globalThis.fetch = async function (url, options) {
           modified = true;
           debugLog(`APPLIED: 1h TTL injected on ${ttlInjected} cache_control block(s)`);
         }
+      } else if (payload.system && !shouldApplyFix("ttl")) {
+        debugLog("SKIPPED: TTL injection disabled via env var");
       }
 
       if (modified) {
