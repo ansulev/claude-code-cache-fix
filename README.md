@@ -105,6 +105,42 @@ The module intercepts `globalThis.fetch` before Claude Code makes API calls to `
 
 All fixes are idempotent — if nothing needs fixing, the request passes through unmodified. The interceptor is read-only with respect to your conversation; it only normalizes the request structure before it hits the API.
 
+## Status line — quota warnings in real time
+
+The interceptor writes quota state to `~/.claude/quota-status.json` on every API call. The included `tools/quota-statusline.sh` script reads this file and displays a live status line in Claude Code showing:
+
+- **Q5h %** with burn rate (%/min)
+- **Q7d %** with burn rate (%/hr)
+- **TTL tier** — shows `TTL:1h` when healthy, **`TTL:5m` in red when the server has downgraded you** (typically at Q5h ≥ 100%)
+- **PEAK** in yellow during weekday peak hours (13:00–19:00 UTC)
+- **Cache hit rate %**
+- **OVERAGE** flag when active
+
+### Setup
+
+Copy the script and configure Claude Code to use it:
+
+```bash
+# Copy from the npm package to Claude Code's hooks directory
+mkdir -p ~/.claude/hooks
+cp "$(npm root -g)/claude-code-cache-fix/tools/quota-statusline.sh" ~/.claude/hooks/
+chmod +x ~/.claude/hooks/quota-statusline.sh
+```
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": {
+    "command": "~/.claude/hooks/quota-statusline.sh"
+  }
+}
+```
+
+### Why this matters
+
+When the server downgrades your TTL to 5m (Layer 2 — quota-aware downgrade at Q5h ≥ 100%), **every idle longer than 5 minutes causes a full context rebuild**. Without the status line, this is invisible — you just notice things getting slower and more expensive. With the status line, the red `TTL:5m` warning tells you immediately: **stop working, wait for the Q5h window to reset, then resume**. Powering through overage compounds the drain; pausing breaks the cycle.
+
 ## Image stripping
 
 Images read via the Read tool are encoded as base64 and stored in `tool_result` blocks in conversation history. They ride along on **every subsequent API call** until compaction. A single 500KB image costs ~62,500 tokens per turn in carry-forward.
