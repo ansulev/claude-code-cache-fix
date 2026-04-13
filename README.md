@@ -208,6 +208,8 @@ export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1
 
 Or add `"includeGitInstructions": false` to `~/.claude/settings.json`. Claude Code can still run `git status` via the Bash tool when it needs git context — it just won't pre-inject it into every system prompt.
 
+The flag also shrinks the Bash tool description by ~6,364 chars (the Bash tool includes git-related instructions that are stripped when the flag is set), for a total prefix savings of ~7,180 chars (~1,800 tokens) per call.
+
 Community-validated by [@wadabum](https://github.com/cnighswonger/claude-code-cache-fix/issues/11): 18-token cache creation across git state changes (vs thousands without the flag). See [#11](https://github.com/cnighswonger/claude-code-cache-fix/issues/11) for the full telemetry comparison.
 
 **Note:** this flag does not address the `"Primary working directory"` line in the system prompt, which changes per git worktree. A v1.9.0 interceptor fix to strip/normalize both is planned ([#11](https://github.com/cnighswonger/claude-code-cache-fix/issues/11)).
