@@ -104,6 +104,30 @@ The wrapper dynamically resolves your npm global root, constructs a `file:///` U
 
 Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335) contributed the Windows wrapper and validated the interceptor across a 7.5-hour, 536-call Opus 4.6 session on Windows — 98.4% cache hit rate, 81% of calls had fingerprint instability that the interceptor corrected.
 
+## VS Code Extension (experimental)
+
+If you use Claude Code through the VS Code extension rather than the CLI, you may be able to load the interceptor via VS Code settings:
+
+```json
+{
+  "claude-code.environmentVariables": {
+    "NODE_OPTIONS": "--import /path/to/claude-code-cache-fix/preload.mjs"
+  }
+}
+```
+
+Replace `/path/to` with your npm global root (`npm root -g`). Example for a typical Linux setup:
+
+```json
+{
+  "claude-code.environmentVariables": {
+    "NODE_OPTIONS": "--import /home/username/.npm-global/lib/node_modules/claude-code-cache-fix/preload.mjs"
+  }
+}
+```
+
+**Status: needs community testing.** We've confirmed the `claude-code.environmentVariables` setting exists but haven't verified it propagates `NODE_OPTIONS` to the CC subprocess. If you test this, please report back on [#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16).
+
 ## How it works
 
 The module intercepts `globalThis.fetch` before Claude Code makes API calls to `/v1/messages`. On each call it:
