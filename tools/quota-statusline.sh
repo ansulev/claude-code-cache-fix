@@ -59,6 +59,16 @@ try:
     if ttl:
         if ttl == '5m':
             label += ' | \033[31mTTL:5m\033[0m'  # red
+            # When on 5m tier, show the cold-rebuild size so users know
+            # the cost of idling past 5 minutes
+            cache_cr = qs.get('cache', {}).get('cache_creation', 0)
+            cache_rd = qs.get('cache', {}).get('cache_read', 0)
+            prefix = cache_cr + cache_rd
+            if prefix > 0:
+                if prefix >= 1_000_000:
+                    label += ' \033[31m\u26A0 idle >5m = {:.1f}M rebuild\033[0m'.format(prefix / 1_000_000)
+                else:
+                    label += ' \033[31m\u26A0 idle >5m = {:.0f}K rebuild\033[0m'.format(prefix / 1_000)
         else:
             label += ' | TTL:' + ttl
     if hit and hit != 'N/A':
