@@ -32,6 +32,10 @@
     "url": "https://github.com/cnighswonger/claude-code-cache-fix/issues"
   },
   "homepage": "https://github.com/cnighswonger/claude-code-cache-fix#readme",
+  "funding": {
+    "type": "individual",
+    "url": "https://buymeacoffee.com/vsits"
+  },
   "license": "MIT",
-  "author": "Chris Nighswonger"
+  "author": "Chris Nighswonger <chris@veritassuperaitsolutions.com> (https://veritassuperaitsolutions.com)"
 }
