@@ -631,6 +631,9 @@ import { join } from "node:path";
 const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
 const PREFIXDIFF = process.env.CACHE_FIX_PREFIXDIFF === "1";
 const NORMALIZE_IDENTITY = process.env.CACHE_FIX_NORMALIZE_IDENTITY === "1";
+const STRIP_GIT_STATUS = process.env.CACHE_FIX_STRIP_GIT_STATUS === "1";
+const TTL_MAIN = (process.env.CACHE_FIX_TTL_MAIN || "1h").toLowerCase();
+const TTL_SUBAGENT = (process.env.CACHE_FIX_TTL_SUBAGENT || "1h").toLowerCase();
 const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
 const SNAPSHOT_DIR = join(homedir(), ".claude", "cache-fix-snapshots");
 const USAGE_JSONL = process.env.CACHE_FIX_USAGE_LOG || join(homedir(), ".claude", "usage.jsonl");
@@ -672,6 +675,7 @@ const _STATS_SCHEMA = {
   tool_sort: { applied: 0, skipped: 0, lastApplied: null },
   ttl: { applied: 0, skipped: 0, lastApplied: null },
   identity: { applied: 0, skipped: 0, lastApplied: null },
+  git_status: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1221,41 +1225,88 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
-      // Bug 5: 1h TTL enforcement
+      // Optimization: strip volatile git-status from system prompt
+      // CC injects live git-status output (branch, changed files, recent commits)
+      // into a system text block. This changes on every file edit, busting the
+      // entire prefix cache. Opt-in via CACHE_FIX_STRIP_GIT_STATUS=1.
+      // The model can still run `git status` via Bash tool when it needs context.
+      if (STRIP_GIT_STATUS && shouldApplyFix("git_status") && payload.system && Array.isArray(payload.system)) {
+        let stripped = 0;
+        payload.system = payload.system.map((block) => {
+          if (block?.type !== "text" || typeof block.text !== "string") return block;
+          // Match the gitStatus section CC injects. Pattern:
+          //   "gitStatus: This is the git status..."
+          //   followed by branch, status, commits until the next section or end
+          const gitStatusPattern = /gitStatus:.*?(?=\n# |\n## |\nWhen |\nAnswer |\n<[a-z]|$)/s;
+          if (!gitStatusPattern.test(block.text)) return block;
+          const newText = block.text.replace(gitStatusPattern, "gitStatus: [stripped by cache-fix for prefix stability]");
+          if (newText !== block.text) {
+            stripped++;
+            return { ...block, text: newText };
+          }
+          return block;
+        });
+        if (stripped > 0) {
+          modified = true;
+          debugLog(`APPLIED: git-status stripped from ${stripped} system block(s)`);
+          recordFixResult("git_status", "applied");
+        } else {
+          recordFixResult("git_status", "skipped");
+        }
+      }
+
+      // Bug 5: TTL enforcement (configurable per request type)
       // The client gates 1h cache TTL behind a GrowthBook allowlist that checks
       // querySource against patterns like "repl_main_thread*", "sdk", "auto_mode".
       // Interactive CLI sessions may not match any pattern, causing the client to
       // send cache_control without ttl (defaulting to 5m server-side).
       // The server honors whatever TTL the client requests — so we inject it.
       // Discovered by @TigerKay1926 on #42052 using our GrowthBook flag dump.
+      //
+      // v1.9.0: configurable per request type via CACHE_FIX_TTL_MAIN and
+      // CACHE_FIX_TTL_SUBAGENT. Values: "1h" (default), "5m", "none".
+      // "none" = don't inject TTL, pass through caller's original cache_control.
       if (payload.system && shouldApplyFix("ttl")) {
-        let ttlInjected = 0;
-        payload.system = payload.system.map((block) => {
-          if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
-            ttlInjected++;
-            return { ...block, cache_control: { ...block.cache_control, ttl: "1h" } };
-          }
-          return block;
-        });
-        // Also check messages for cache_control blocks (conversation history breakpoints)
-        if (payload.messages) {
-          for (const msg of payload.messages) {
-            if (!Array.isArray(msg.content)) continue;
-            for (let i = 0; i < msg.content.length; i++) {
-              const b = msg.content[i];
-              if (b.cache_control?.type === "ephemeral" && !b.cache_control.ttl) {
-                msg.content[i] = { ...b, cache_control: { ...b.cache_control, ttl: "1h" } };
-                ttlInjected++;
+        // Detect subagent: Agent SDK identity in system[1]
+        const AGENT_SDK_PREFIX = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+        const isSubagent = Array.isArray(payload.system) &&
+          payload.system.some((b) => b?.type === "text" && typeof b.text === "string" && b.text.startsWith(AGENT_SDK_PREFIX));
+        const ttlValue = isSubagent ? TTL_SUBAGENT : TTL_MAIN;
+        const requestType = isSubagent ? "subagent" : "main";
+
+        if (ttlValue === "none") {
+          debugLog(`SKIPPED: TTL injection (${requestType} set to 'none' — pass-through)`);
+          recordFixResult("ttl", "skipped");
+        } else {
+          const ttlParam = ttlValue === "5m" ? "5m" : "1h";
+          let ttlInjected = 0;
+          payload.system = payload.system.map((block) => {
+            if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
+              ttlInjected++;
+              return { ...block, cache_control: { ...block.cache_control, ttl: ttlParam } };
+            }
+            return block;
+          });
+          // Also check messages for cache_control blocks (conversation history breakpoints)
+          if (payload.messages) {
+            for (const msg of payload.messages) {
+              if (!Array.isArray(msg.content)) continue;
+              for (let i = 0; i < msg.content.length; i++) {
+                const b = msg.content[i];
+                if (b.cache_control?.type === "ephemeral" && !b.cache_control.ttl) {
+                  msg.content[i] = { ...b, cache_control: { ...b.cache_control, ttl: ttlParam } };
+                  ttlInjected++;
+                }
               }
             }
           }
-        }
-        if (ttlInjected > 0) {
-          modified = true;
-          debugLog(`APPLIED: 1h TTL injected on ${ttlInjected} cache_control block(s)`);
-          recordFixResult("ttl", "applied");
-        } else {
-          recordFixResult("ttl", "skipped");
+          if (ttlInjected > 0) {
+            modified = true;
+            debugLog(`APPLIED: ${ttlParam} TTL injected on ${ttlInjected} cache_control block(s) (${requestType})`);
+            recordFixResult("ttl", "applied");
+          } else {
+            recordFixResult("ttl", "skipped");
+          }
         }
       } else if (payload.system && !shouldApplyFix("ttl")) {
         debugLog("SKIPPED: TTL injection disabled via env var");
@@ -1269,6 +1320,60 @@ globalThis.fetch = async function (url, options) {
       // Monitor for microcompact / budget enforcement degradation
       if (payload.messages) {
         monitorContextDegradation(payload.messages);
+      }
+
+      // Diagnostic: dump cache breakpoint structure to a file when
+      // CACHE_FIX_DUMP_BREAKPOINTS=<path> is set. Maps where cache_control markers
+      // sit across system blocks and message content. Used to investigate #12
+      // (missing breakpoint #3 for skills/CLAUDE.md).
+      if (process.env.CACHE_FIX_DUMP_BREAKPOINTS && payload.system) {
+        try {
+          const dumpPath = process.env.CACHE_FIX_DUMP_BREAKPOINTS;
+          const breakpoints = [];
+          // System blocks
+          if (Array.isArray(payload.system)) {
+            payload.system.forEach((block, idx) => {
+              if (block.cache_control) {
+                breakpoints.push({
+                  location: "system",
+                  index: idx,
+                  type: block.type,
+                  cache_control: block.cache_control,
+                  text_preview: (block.text || "").slice(0, 120),
+                  text_chars: (block.text || "").length,
+                });
+              }
+            });
+          }
+          // Message blocks
+          if (payload.messages) {
+            payload.messages.forEach((msg, msgIdx) => {
+              if (!Array.isArray(msg.content)) return;
+              msg.content.forEach((block, blockIdx) => {
+                if (block.cache_control) {
+                  breakpoints.push({
+                    location: `messages[${msgIdx}].content`,
+                    role: msg.role,
+                    index: blockIdx,
+                    type: block.type,
+                    cache_control: block.cache_control,
+                    text_preview: (block.text || "").slice(0, 120),
+                    text_chars: (block.text || "").length,
+                  });
+                }
+              });
+            });
+          }
+          const dump = {
+            timestamp: new Date().toISOString(),
+            breakpoint_count: breakpoints.length,
+            breakpoints,
+            system_block_count: Array.isArray(payload.system) ? payload.system.length : 0,
+            message_count: payload.messages ? payload.messages.length : 0,
+          };
+          writeFileSync(dumpPath, JSON.stringify(dump, null, 2));
+          debugLog(`DUMP: ${breakpoints.length} cache breakpoints written to ${dumpPath}`);
+        } catch (e) { debugLog("BREAKPOINT DUMP ERROR:", e?.message); }
       }
 
       // Diagnostic: dump full tools array (names, descriptions, schemas, sizes) to a file

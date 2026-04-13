@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.9.0 (2026-04-13)
+
+Cache-busting mitigation, configurable TTL, and diagnostic tooling.
+
+- **Git-status stripping** (#11) — Opt-in removal of volatile `gitStatus` section from system prompt. CC injects live git status (branch, changed files, recent commits) that changes on every file edit, busting the entire prefix cache. Set `CACHE_FIX_STRIP_GIT_STATUS=1` to replace with a stable placeholder. The model can still run `git status` via Bash when it needs context. Kill switch: `CACHE_FIX_SKIP_GIT_STATUS=1`.
+- **Configurable TTL per request type** (#14) — TTL injection now distinguishes main-thread from subagent requests. `CACHE_FIX_TTL_MAIN` and `CACHE_FIX_TTL_SUBAGENT` accept `1h` (default), `5m`, or `none` (pass-through). Subagent detection reuses the Agent SDK identity string from `system[1]`. Users on API keys or custom `ANTHROPIC_BASE_URL` can now control TTL per call type.
+- **Cache breakpoint dump** (#12) — Diagnostic env var `CACHE_FIX_DUMP_BREAKPOINTS=<path>` writes the full `cache_control` breakpoint structure (system blocks + message blocks) to a JSON file. Maps breakpoint positions, types, TTLs, and content previews. Used to investigate the missing breakpoint #3 (skills/CLAUDE.md) identified by @wadabum.
+- **Cost-report tier fix** (#7) — `cost-report.mjs` now correctly assigns cache creation tokens to the 1h write rate when `ephemeral_1h_input_tokens > 0`. Previously all creation was assumed 5m when the ephemeral breakdown fields were zero, understating cost for 1h-tier sessions.
+
 ## 1.8.1 (2026-04-13)
 
 - **nvm-compatible wrapper script** — README wrapper now uses `npm root -g` for dynamic path resolution instead of hardcoded `$HOME/.npm-global`. Fixes setup for nvm, volta, and other Node version managers. Adds existence check for the interceptor module. Credit: [@arjansingh](https://github.com/arjansingh) (PR #15).

@@ -431,8 +431,13 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 | `CACHE_FIX_SKIP_RELOCATE` | `0` | Skip block relocation fix (Bug 1) |
 | `CACHE_FIX_SKIP_FINGERPRINT` | `0` | Skip fingerprint stabilization (Bug 2b) |
 | `CACHE_FIX_SKIP_TOOL_SORT` | `0` | Skip tool ordering stabilization (Bug 2a) |
-| `CACHE_FIX_SKIP_TTL` | `0` | Skip 1h TTL injection (Bug 5) |
+| `CACHE_FIX_SKIP_TTL` | `0` | Skip TTL injection (Bug 5) |
 | `CACHE_FIX_SKIP_IDENTITY` | `0` | Skip identity normalization (Bug 6) |
+| `CACHE_FIX_SKIP_GIT_STATUS` | `0` | Skip git-status stripping |
+| `CACHE_FIX_STRIP_GIT_STATUS` | `0` | Strip volatile git-status from system prompt for prefix stability. Model can still run `git status` via Bash. |
+| `CACHE_FIX_TTL_MAIN` | `1h` | TTL for main-thread requests: `1h`, `5m`, or `none` (pass-through) |
+| `CACHE_FIX_TTL_SUBAGENT` | `1h` | TTL for subagent requests: `1h`, `5m`, or `none` (pass-through) |
+| `CACHE_FIX_DUMP_BREAKPOINTS` | unset | Path to dump cache breakpoint structure (diagnostic for #12) |
 
 ## Limitations
 

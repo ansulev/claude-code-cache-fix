@@ -397,13 +397,24 @@ function calculateCosts(entries, ratesData) {
       continue;
     }
 
-    // Determine cache write tier breakdown
-    // If telemetry has eph_1h/eph_5m, use those; otherwise assume all cache_create is 5m
-    let cw1h = entry.eph_1h;
-    let cw5m = entry.eph_5m;
-    if (cw1h === 0 && cw5m === 0 && entry.cache_create > 0) {
-      // No tier breakdown available; assume 5m (conservative — lower rate)
-      cw5m = entry.cache_create;
+    // Determine cache write tier for cache_creation tokens.
+    // eph_1h/eph_5m are READ tokens (cache hits per tier), not write tokens.
+    // But they tell us which tier the request was on — and cache creation on
+    // that request uses the same tier's write rate.
+    // Fix for #7: previously assigned all creation to 5m when eph fields were 0.
+    let cw1h = 0;
+    let cw5m = 0;
+    if (entry.cache_create > 0) {
+      if (entry.eph_1h > 0) {
+        // Request was on 1h tier — creation charged at 1h write rate
+        cw1h = entry.cache_create;
+      } else if (entry.eph_5m > 0) {
+        // Request was on 5m tier — creation charged at 5m write rate
+        cw5m = entry.cache_create;
+      } else {
+        // No tier signal available; assume 5m (conservative — lower rate)
+        cw5m = entry.cache_create;
+      }
     }
 
     const cost = (
