@@ -17,6 +17,10 @@ REM
 REM Credit: @TomTheMenace (https://github.com/anthropics/claude-code/issues/38335)
 REM Part of claude-code-cache-fix: https://github.com/cnighswonger/claude-code-cache-fix
 
+REM Resolve npm global root and URL-encode it so spaces (e.g. "C:\Program Files\nodejs")
+REM don't break NODE_OPTIONS parsing. Without encoding, Node splits --import file:/// on
+REM the literal space and fails with ERR_MODULE_NOT_FOUND: Cannot find module 'C:\Program'.
 for /f "delims=" %%G in ('npm root -g') do set "NPM_GLOBAL=%%G"
-set NODE_OPTIONS=--import file:///%NPM_GLOBAL:\=/%/claude-code-cache-fix/preload.mjs
+for /f "delims=" %%U in ('powershell -NoProfile -Command "[System.Uri]::EscapeUriString(('%NPM_GLOBAL:\=/%' + '/claude-code-cache-fix/preload.mjs'))"') do set "PRELOAD_URL=%%U"
+set NODE_OPTIONS=--import file:///%PRELOAD_URL%
 node "%NPM_GLOBAL%\@anthropic-ai\claude-code\cli.js" %*
