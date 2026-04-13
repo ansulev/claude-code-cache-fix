@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.8.1 (2026-04-13)
+
+- **nvm-compatible wrapper script** — README wrapper now uses `npm root -g` for dynamic path resolution instead of hardcoded `$HOME/.npm-global`. Fixes setup for nvm, volta, and other Node version managers. Adds existence check for the interceptor module. Credit: [@arjansingh](https://github.com/arjansingh) (PR #15).
+
 ## 1.8.0 (2026-04-13)
 
 Safety, lifecycle management, and self-deprecation features. Merges @thepiper18's hardening PR (#8) — 28 new tests bringing the suite to 75.

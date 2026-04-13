@@ -516,6 +516,7 @@ measurable signature of cache-efficiency degradation.
 - **[@Renvect](https://github.com/Renvect)** — Image duplication discovery, cross-project directory contamination analysis
 - **[@fgrosswig](https://github.com/fgrosswig)** — [claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard) forensic methodology: cost-factor overhead ratio metric, `anthropic-*` header capture pattern, proxy NDJSON schema that informed our dashboard interop layer
 - **[@TomTheMenace](https://github.com/TomTheMenace)** — Windows `.bat` wrapper for the interceptor, first Windows platform validation (7.5h/536-call Opus 4.6 session, 98.4% cache hit rate, 81% fingerprint instability corrected)
+- **[@arjansingh](https://github.com/arjansingh)** — nvm-compatible wrapper script with dynamic `npm root -g` path resolution (PR #15)
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 
