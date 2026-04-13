@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1 (2026-04-13)
+
+- **Windows: URL-encode npm root in `claude-fixed.bat`** — Fixes `ERR_MODULE_NOT_FOUND` on default Windows Node.js installs where npm root contains spaces (e.g. `C:\Program Files\nodejs\node_modules`). Uses PowerShell `[System.Uri]::EscapeUriString` to encode the path; no-op on space-free paths. Credit: [@beekamai](https://github.com/beekamai) (PR #17).
+
 ## 1.9.0 (2026-04-13)
 
 Cache-busting mitigation, configurable TTL, and diagnostic tooling.
