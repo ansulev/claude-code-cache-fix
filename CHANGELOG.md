@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.8.0 (2026-04-13)
+
+Safety, lifecycle management, and self-deprecation features. Merges @thepiper18's hardening PR (#8) — 28 new tests bringing the suite to 75.
+
+- **Fingerprint round-trip safety check (P0)** — Before rewriting `cc_version`, verifies our salt/indices reproduce the fingerprint CC sent. If verification fails (CC changed its algorithm), the rewrite is skipped automatically. The interceptor can never make cache performance *worse* than stock CC.
+- **Master kill switch + per-fix toggles** — `CACHE_FIX_DISABLED=1` disables all bug fixes while keeping monitoring + optimizations active. Per-fix: `CACHE_FIX_SKIP_{RELOCATE,FINGERPRINT,TOOL_SORT,TTL,IDENTITY}`.
+- **Persistent effectiveness stats** — `~/.claude/cache-fix-stats.json` tracks per-fix applied/skipped/safetyBlocked counts with 30-day auto-prune and atomic writes.
+- **Startup health status line** — On first API call, logs per-fix status: `active(2h ago)`, `dormant(5 clean sessions)`, `safety-blocked(Nx)`, `waiting`. Includes advisory messages for dormant fixes.
+- **Cache regression detector** — In-memory ring buffer tracking `cache_read` ratio. Warns if ratio drops below 50% across 5+ consecutive calls — especially useful when fixes are disabled and CC regresses.
+- **Portuguese guide** (`docs/guia-pt-br.md`) — Full setup and usage guide in Portuguese. Credit: @thepiper18.
+- **"Graduating from Fixes" + "Safety" README sections** — Documents the three-purpose lifecycle model (bug fixes / monitoring / optimizations) and the fail-safe design guarantee.
+
 ## 1.7.2 (2026-04-12)
 
 - **Status line for real-time quota/TTL warnings** — Ships `tools/quota-statusline.sh`, a Claude Code status line script that displays live Q5h%, Q7d%, burn rates, TTL tier, cache hit rate, peak-hour flag, and overage status. When the server downgrades to 5m TTL at Q5h ≥ 100% (Layer 2 quota-aware downgrade), the status line shows `TTL:5m` in red — a visible "stop and wait" signal that prevents users from power-driving through overage and compounding the drain. Setup: copy the script to `~/.claude/hooks/` and add `"statusLine": { "command": "~/.claude/hooks/quota-statusline.sh" }` to `~/.claude/settings.json`.

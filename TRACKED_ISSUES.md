@@ -118,6 +118,13 @@ Users who have confirmed the interceptor resolved their issue:
 
 ## Issues needing our attention
 
+## NEW: Upstream cache-busting mechanisms (wadabum, Apr 12)
+
+| # | Title | State | Why it matters |
+|---|-------|-------|---------------|
+| [#47098](https://github.com/anthropics/claude-code/issues/47098) | New sessions will NEVER hit a full cache | Open | Skills + CLAUDE.md blocks in `messages[0]` are not prefix-cacheable. Regenerated non-deterministically on fresh session / `/clear`. 6,505+ tokens of cache_creation even seconds after prior session. Separate from TTL issue — prefix placement problem. **Our issue #12.** |
+| [#47107](https://github.com/anthropics/claude-code/issues/47107) | Uncachable system prompt caused by git status | Open | `includeGitInstructions` (default: true) injects live `git status` into `system[]`. Every file edit busts the entire system-prompt cache prefix. **Our issue #11.** |
+
 ### Completed (2026-04-12 morning — Sunday check-in)
 - #38335: Replied to @ssougnez with v2.1.81 pin instructions + interceptor recommendation + soft ask for fallback-percentage data contribution.
 - #38335: @dewtoricor1997-ship-it posted **first independent replication of v2.1.81 pin on Max 20x** — "reached ONLY 10% of my weekly quota vs 30% on v2.1.83+, approximately 3-4× improvement." Strongest community validation datum to date. Held acknowledgment for Monday Part 2 bundle.

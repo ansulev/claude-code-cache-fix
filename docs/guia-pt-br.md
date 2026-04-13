@@ -20,11 +20,13 @@ Repositório original: https://github.com/cnighswonger/claude-code-cache-fix
 
 É um módulo Node.js que intercepta as chamadas HTTP do Claude Code antes de saírem da sua máquina, corrige os bugs, e manda a versão corrigida pra API.
 
-## Nosso fork (com melhorias de segurança)
+## Melhorias de segurança (v1.8.0+)
 
-https://github.com/thepiper18/claude-code-cache-fix/tree/feat/hardening
+As melhorias de segurança do [@thepiper18](https://github.com/thepiper18) foram integradas ao repositório principal a partir da v1.8.0:
 
-O que adicionamos:
+https://github.com/cnighswonger/claude-code-cache-fix
+
+O que foi adicionado:
 
 - **Verificação de segurança do fingerprint** — O fix original pode piorar as coisas se a Anthropic mudar o algoritmo interno. Nosso fork verifica antes de reescrever, e se não bater, não mexe (em vez de corromper)
 - **Kill switch** (`CACHE_FIX_DISABLED=1`) — Desliga todos os fixes mas mantém o monitoramento
@@ -40,12 +42,8 @@ O que adicionamos:
 # 1. Instalar Claude Code via npm (pode ter os dois instalados)
 npm install -g @anthropic-ai/claude-code
 
-# 2. Instalar nosso fork
-cd ~/Developer  # ou onde preferir
-git clone https://github.com/thepiper18/claude-code-cache-fix.git
-cd claude-code-cache-fix
-git checkout feat/hardening
-npm install -g .
+# 2. Instalar o cache-fix (inclui as melhorias de segurança a partir da v1.8.0)
+npm install -g claude-code-cache-fix
 
 # 3. Criar um script de lançamento
 cat > ~/.local/bin/claude-fixed << 'EOF'
@@ -107,7 +105,6 @@ O comando `claude` normal (binário standalone) não é afetado em nenhum moment
 
 ## Links
 
-- Fork com melhorias: https://github.com/thepiper18/claude-code-cache-fix/tree/feat/hardening
-- PR pro projeto original: https://github.com/cnighswonger/claude-code-cache-fix/pull/8
-- Projeto original: https://github.com/cnighswonger/claude-code-cache-fix
+- Projeto: https://github.com/cnighswonger/claude-code-cache-fix
+- PR de segurança por @thepiper18: https://github.com/cnighswonger/claude-code-cache-fix/pull/8 (integrado na v1.8.0)
 - Issues relacionadas no Claude Code: [#34629](https://github.com/anthropics/claude-code/issues/34629), [#40524](https://github.com/anthropics/claude-code/issues/40524), [#42052](https://github.com/anthropics/claude-code/issues/42052)
