@@ -36,7 +36,10 @@ Create a wrapper script (e.g. `~/bin/claude-fixed`):
 
 ```bash
 #!/bin/bash
-CLAUDE_NPM_CLI="$HOME/.npm-global/lib/node_modules/@anthropic-ai/claude-code/cli.js"
+NPM_GLOBAL_ROOT="$(npm root -g 2>/dev/null)"
+
+CLAUDE_NPM_CLI="$NPM_GLOBAL_ROOT/@anthropic-ai/claude-code/cli.js"
+CACHE_FIX="$NPM_GLOBAL_ROOT/claude-code-cache-fix/preload.mjs"
 
 if [ ! -f "$CLAUDE_NPM_CLI" ]; then
   echo "Error: Claude Code npm package not found at $CLAUDE_NPM_CLI" >&2
@@ -44,7 +47,13 @@ if [ ! -f "$CLAUDE_NPM_CLI" ]; then
   exit 1
 fi
 
-exec env NODE_OPTIONS="--import claude-code-cache-fix" node "$CLAUDE_NPM_CLI" "$@"
+if [ ! -f "$CACHE_FIX" ]; then
+  echo "Error: claude-code-cache-fix not found at $CACHE_FIX" >&2
+  echo "Install with: npm install -g claude-code-cache-fix" >&2
+  exit 1
+fi
+
+exec env NODE_OPTIONS="--import $CACHE_FIX" node "$CLAUDE_NPM_CLI" "$@"
 ```
 
 ```bash
