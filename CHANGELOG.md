@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2 (2026-04-12)
+
+- **Status line for real-time quota/TTL warnings** — Ships `tools/quota-statusline.sh`, a Claude Code status line script that displays live Q5h%, Q7d%, burn rates, TTL tier, cache hit rate, peak-hour flag, and overage status. When the server downgrades to 5m TTL at Q5h ≥ 100% (Layer 2 quota-aware downgrade), the status line shows `TTL:5m` in red — a visible "stop and wait" signal that prevents users from power-driving through overage and compounding the drain. Setup: copy the script to `~/.claude/hooks/` and add `"statusLine": { "command": "~/.claude/hooks/quota-statusline.sh" }` to `~/.claude/settings.json`.
+- **README: "Status line — quota warnings in real time"** — New section with feature list, setup instructions, and explanation of why TTL visibility matters for Layer 2 behavior.
+
 ## 1.7.1 (2026-04-12)
 
 - **Windows support** — Added `claude-fixed.bat` wrapper for Windows users where `NODE_OPTIONS="--import ..."` doesn't work. Dynamically resolves npm global root, constructs `file:///` URL with forward-slash conversion, launches Claude Code with the interceptor active. Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335).
