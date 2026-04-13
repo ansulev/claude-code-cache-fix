@@ -198,7 +198,21 @@ Add to `~/.claude/settings.json`:
 }
 ```
 
-### Why this matters
+### Recommended: disable git-status injection
+
+Claude Code injects live `git status` output into the system prompt on every call. Any file edit changes the git status, which changes the system prompt, which busts the entire prefix cache. Disabling this saves ~1,800 tokens per call and fully stabilizes the system prompt across file edits:
+
+```bash
+export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1
+```
+
+Or add `"includeGitInstructions": false` to `~/.claude/settings.json`. Claude Code can still run `git status` via the Bash tool when it needs git context — it just won't pre-inject it into every system prompt.
+
+Community-validated by [@wadabum](https://github.com/cnighswonger/claude-code-cache-fix/issues/11): 18-token cache creation across git state changes (vs thousands without the flag). See [#11](https://github.com/cnighswonger/claude-code-cache-fix/issues/11) for the full telemetry comparison.
+
+**Note:** this flag does not address the `"Primary working directory"` line in the system prompt, which changes per git worktree. A v1.9.0 interceptor fix to strip/normalize both is planned ([#11](https://github.com/cnighswonger/claude-code-cache-fix/issues/11)).
+
+### Why the status line matters
 
 When the server downgrades your TTL to 5m (Layer 2 — quota-aware downgrade at Q5h ≥ 100%), **every idle longer than 5 minutes causes a full context rebuild**. Without the status line, this is invisible — you just notice things getting slower and more expensive. With the status line, the red `TTL:5m` warning tells you immediately: **stop working, wait for the Q5h window to reset, then resume**. Powering through overage compounds the drain; pausing breaks the cycle.
 
