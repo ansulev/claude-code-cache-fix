@@ -84,6 +84,25 @@ function extractRealUserMessageText(messages) {
 }
 
 /**
+ * Extract text from messages[0] the way CC's original fingerprint code does —
+ * including meta/attachment blocks. Used only for round-trip verification.
+ */
+function extractFirstMessageText(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return "";
+  const first = messages[0];
+  if (!first || first.role !== "user") return "";
+  const content = first.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  for (const block of content) {
+    if (block.type === "text" && typeof block.text === "string") {
+      return block.text;
+    }
+  }
+  return "";
+}
+
+/**
  * Extract current cc_version from system prompt blocks and recompute with
  * stable fingerprint. Returns { oldVersion, newVersion, stableFingerprint }.
  */
@@ -106,6 +125,23 @@ function stabilizeFingerprint(system, messages) {
 
   const baseVersion = dotParts.slice(0, 3).join("."); // "2.1.87"
   const oldFingerprint = dotParts[3]; // "a3f"
+
+  // --- SAFETY: Round-trip verification ---
+  // Verify our salt/indices reproduce CC's fingerprint for the ORIGINAL
+  // message text (messages[0] content, which is what CC used).
+  // If our computation doesn't match, our constants are stale — skip rewrite.
+  const originalText = extractFirstMessageText(messages);
+  const verification = computeFingerprint(originalText, baseVersion);
+  if (verification !== oldFingerprint) {
+    debugLog(
+      "FINGERPRINT SAFETY: round-trip verification failed.",
+      `CC sent '${oldFingerprint}', we computed '${verification}'.`,
+      "Salt/indices may have changed in this CC version. Skipping rewrite."
+    );
+    recordFixResult("fingerprint", "safety_blocked");
+    return null;
+  }
+  // --- END SAFETY ---
 
   // Compute stable fingerprint from real user text
   const realText = extractRealUserMessageText(messages);
@@ -588,7 +624,7 @@ function replaceOutputEfficiencySection(text) {
 // Set CACHE_FIX_DEBUG=1 to enable
 // --------------------------------------------------------------------------
 
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -603,6 +639,103 @@ function debugLog(...args) {
   if (!DEBUG) return;
   const line = `[${new Date().toISOString()}] ${args.join(" ")}\n`;
   try { appendFileSync(LOG_PATH, line); } catch {}
+}
+
+// --------------------------------------------------------------------------
+// Kill switches — disable fixes while keeping monitoring active
+// --------------------------------------------------------------------------
+
+const FIXES_DISABLED = process.env.CACHE_FIX_DISABLED === "1";
+
+/**
+ * Check if a specific fix should be applied.
+ * Returns false if master kill switch is on OR individual fix is skipped.
+ * Monitoring and optimizations (image strip, output efficiency) are NOT
+ * affected by CACHE_FIX_DISABLED — only bug fixes are.
+ */
+function shouldApplyFix(fixName) {
+  if (FIXES_DISABLED) return false;
+  const skipKey = `CACHE_FIX_SKIP_${fixName.toUpperCase()}`;
+  if (process.env[skipKey] === "1") return false;
+  return true;
+}
+
+// --------------------------------------------------------------------------
+// Persistent effectiveness stats
+// --------------------------------------------------------------------------
+
+const STATS_PATH = join(homedir(), ".claude", "cache-fix-stats.json");
+
+const _STATS_SCHEMA = {
+  relocate: { applied: 0, skipped: 0, bugPresent: 0, resumeScanned: 0, lastApplied: null, lastScanned: null },
+  fingerprint: { applied: 0, skipped: 0, safetyBlocked: 0, lastApplied: null },
+  tool_sort: { applied: 0, skipped: 0, lastApplied: null },
+  ttl: { applied: 0, skipped: 0, lastApplied: null },
+  identity: { applied: 0, skipped: 0, lastApplied: null },
+};
+
+function _createEmptyStats() {
+  return {
+    version: 1,
+    created: new Date().toISOString(),
+    lastUpdated: null,
+    fixes: JSON.parse(JSON.stringify(_STATS_SCHEMA)),
+  };
+}
+
+/** Read stats from disk. Returns empty stats on any error. */
+function readStats() {
+  try {
+    const data = JSON.parse(readFileSync(STATS_PATH, "utf8"));
+    if (data.created) {
+      const ageDays = (Date.now() - new Date(data.created).getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > 30) return _createEmptyStats();
+    }
+    for (const [key, schema] of Object.entries(_STATS_SCHEMA)) {
+      if (!data.fixes[key]) data.fixes[key] = { ...schema };
+    }
+    return data;
+  } catch {
+    return _createEmptyStats();
+  }
+}
+
+/** Atomic write: temp file + rename to avoid corruption. */
+function writeStats(stats) {
+  try {
+    stats.lastUpdated = new Date().toISOString();
+    const tmp = STATS_PATH + ".tmp";
+    writeFileSync(tmp, JSON.stringify(stats, null, 2));
+    renameSync(tmp, STATS_PATH);
+  } catch (e) {
+    debugLog("STATS WRITE ERROR:", e?.message);
+  }
+}
+
+function recordFixResult(fixName, result) {
+  const stats = readStats();
+  if (!stats.fixes[fixName]) return;
+  const now = new Date().toISOString();
+  stats.lastUpdated = now;
+  if (result === "applied") {
+    stats.fixes[fixName].applied++;
+    stats.fixes[fixName].lastApplied = now;
+  } else if (result === "skipped") {
+    stats.fixes[fixName].skipped++;
+  } else if (result === "safety_blocked") {
+    stats.fixes[fixName].safetyBlocked = (stats.fixes[fixName].safetyBlocked || 0) + 1;
+  }
+  writeStats(stats);
+}
+
+function recordRelocateScan(bugFound) {
+  const stats = readStats();
+  const now = new Date().toISOString();
+  stats.lastUpdated = now;
+  stats.fixes.relocate.resumeScanned++;
+  stats.fixes.relocate.lastScanned = now;
+  if (bugFound) stats.fixes.relocate.bugPresent++;
+  writeStats(stats);
 }
 
 // --------------------------------------------------------------------------
@@ -653,6 +786,59 @@ function dumpGrowthBookFlags() {
     debugLog("GROWTHBOOK FLAGS:", JSON.stringify(interesting, null, 2));
   } catch (e) {
     debugLog("GROWTHBOOK: failed to read ~/.claude.json:", e?.message);
+  }
+}
+
+// --------------------------------------------------------------------------
+// Startup health status line
+// --------------------------------------------------------------------------
+
+let _healthLinePrinted = false;
+
+function _formatTimeSince(isoString) {
+  if (!isoString) return "never";
+  const ms = Date.now() - new Date(isoString).getTime();
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  const days = Math.floor(hours / 24);
+  if (days > 0) return `${days}d ago`;
+  if (hours > 0) return `${hours}h ago`;
+  const mins = Math.floor(ms / (1000 * 60));
+  return `${mins}m ago`;
+}
+
+function _formatFixStatus(fixName, fixStats, dormantThreshold = 5) {
+  if (fixName === "relocate") {
+    if (fixStats.resumeScanned >= dormantThreshold && fixStats.bugPresent === 0) {
+      return `dormant(${fixStats.resumeScanned} clean sessions)`;
+    }
+  } else {
+    if (fixStats.skipped >= dormantThreshold && fixStats.applied === 0) {
+      return `dormant(${fixStats.skipped} skips)`;
+    }
+  }
+  if (fixStats.safetyBlocked > 0) return `safety-blocked(${fixStats.safetyBlocked}x)`;
+  if (fixStats.lastApplied) return `active(${_formatTimeSince(fixStats.lastApplied)})`;
+  return "waiting";
+}
+
+function printHealthLine() {
+  if (_healthLinePrinted) return;
+  _healthLinePrinted = true;
+  const stats = readStats();
+  const parts = [];
+  for (const [name, fixStats] of Object.entries(stats.fixes)) {
+    const status = _formatFixStatus(name, fixStats);
+    parts.push(`${name}=${status}`);
+    if (status.startsWith("dormant")) {
+      debugLog(`DORMANT: ${name} — CC may have fixed this. Consider CACHE_FIX_SKIP_${name.toUpperCase()}=1`);
+    }
+    if (status.startsWith("safety-blocked")) {
+      debugLog(`SAFETY: ${name} — salt/indices may have changed. Fix is auto-disabled.`);
+    }
+  }
+  debugLog(`HEALTH: ${parts.join(" ")}`);
+  if (FIXES_DISABLED) {
+    debugLog("HEALTH: all fixes disabled via CACHE_FIX_DISABLED=1 (monitoring active)");
   }
 }
 
@@ -802,6 +988,50 @@ function snapshotPrefix(payload) {
 }
 
 // --------------------------------------------------------------------------
+// Cache regression detector
+// --------------------------------------------------------------------------
+
+const _cacheHistory = []; // in-memory ring buffer of { ratio, turn }
+const REGRESSION_MIN_CALLS = 5;
+const REGRESSION_MIN_RATIO = 0.5;
+let _apiCallCount = 0;
+
+function _computeCacheRatio(usage) {
+  if (!usage) return null;
+  const read = usage.cache_read_input_tokens || 0;
+  const creation = usage.cache_creation_input_tokens || 0;
+  const input = usage.input_tokens || 0;
+  const total = read + creation + input;
+  if (total === 0) return null;
+  return read / total;
+}
+
+function _checkCacheRegression() {
+  if (_cacheHistory.length < REGRESSION_MIN_CALLS) return;
+  const recent = _cacheHistory.slice(-REGRESSION_MIN_CALLS);
+  const allLow = recent.every((h) => h.ratio < REGRESSION_MIN_RATIO);
+  if (allLow) {
+    const avgRatio = recent.reduce((sum, h) => sum + h.ratio, 0) / recent.length;
+    debugLog(
+      `REGRESSION WARNING: cache_read ratio averaged ${Math.round(avgRatio * 100)}%`,
+      `across last ${REGRESSION_MIN_CALLS} calls (threshold: ${REGRESSION_MIN_RATIO * 100}%).`,
+      FIXES_DISABLED
+        ? "Fixes are disabled — consider re-enabling to recover cache performance."
+        : "Fixes are active but cache is still degraded — CC may have introduced a new bug."
+    );
+  }
+}
+
+function _trackCacheRatio(usage) {
+  if (_apiCallCount <= 1) return; // skip first call (cache creation, no reads)
+  const ratio = _computeCacheRatio(usage);
+  if (ratio === null) return;
+  _cacheHistory.push({ ratio, turn: _apiCallCount });
+  if (_cacheHistory.length > 20) _cacheHistory.shift(); // ring buffer
+  _checkCacheRegression();
+}
+
+// --------------------------------------------------------------------------
 // Fetch interceptor
 // --------------------------------------------------------------------------
 
@@ -817,11 +1047,17 @@ globalThis.fetch = async function (url, options) {
 
   if (isMessagesEndpoint && options?.body && typeof options.body === "string") {
     try {
+      _apiCallCount++;
       const payload = JSON.parse(options.body);
       let modified = false;
 
       // One-time GrowthBook flag dump on first API call
       dumpGrowthBookFlags();
+      printHealthLine();
+
+      if (FIXES_DISABLED) {
+        debugLog("CACHE_FIX_DISABLED=1 — all bug fixes bypassed, monitoring active");
+      }
 
       debugLog("--- API call to", urlStr);
       debugLog("message count:", payload.messages?.length);
@@ -832,7 +1068,7 @@ globalThis.fetch = async function (url, options) {
       }
 
       // Bug 1: Relocate resume attachment blocks
-      if (payload.messages) {
+      if (payload.messages && shouldApplyFix("relocate")) {
         // Log message structure for debugging
         if (DEBUG) {
           let firstUserIdx = -1, lastUserIdx = -1;
@@ -868,13 +1104,21 @@ globalThis.fetch = async function (url, options) {
         }
 
         const normalized = normalizeResumeMessages(payload.messages);
+        // Track bug presence for dormancy detection (resume = messages > 5)
+        const isResume = payload.messages.length > 5;
+        if (isResume) recordRelocateScan(normalized !== payload.messages);
+
         if (normalized !== payload.messages) {
           payload.messages = normalized;
           modified = true;
           debugLog("APPLIED: resume message relocation");
+          recordFixResult("relocate", "applied");
         } else {
           debugLog("SKIPPED: resume relocation (not a resume or already correct)");
+          recordFixResult("relocate", "skipped");
         }
+      } else if (payload.messages && !shouldApplyFix("relocate")) {
+        debugLog("SKIPPED: relocate fix disabled via env var");
       }
 
       // Image stripping: remove old tool_result images to reduce token waste
@@ -895,7 +1139,7 @@ globalThis.fetch = async function (url, options) {
       }
 
       // Bug 2a: Stabilize tool ordering
-      if (payload.tools) {
+      if (payload.tools && shouldApplyFix("tool_sort")) {
         const sorted = stabilizeToolOrder(payload.tools);
         const changed = sorted.some(
           (t, i) => t.name !== payload.tools[i]?.name
@@ -904,11 +1148,16 @@ globalThis.fetch = async function (url, options) {
           payload.tools = sorted;
           modified = true;
           debugLog("APPLIED: tool order stabilization");
+          recordFixResult("tool_sort", "applied");
+        } else {
+          recordFixResult("tool_sort", "skipped");
         }
+      } else if (payload.tools && !shouldApplyFix("tool_sort")) {
+        debugLog("SKIPPED: tool sort fix disabled via env var");
       }
 
       // Bug 2b: Stabilize fingerprint in attribution header
-      if (payload.system && payload.messages) {
+      if (payload.system && payload.messages && shouldApplyFix("fingerprint")) {
         const fix = stabilizeFingerprint(payload.system, payload.messages);
         if (fix) {
           payload.system = [...payload.system];
@@ -918,7 +1167,12 @@ globalThis.fetch = async function (url, options) {
           };
           modified = true;
           debugLog("APPLIED: fingerprint stabilized from", fix.oldFingerprint, "to", fix.stableFingerprint);
+          recordFixResult("fingerprint", "applied");
+        } else {
+          recordFixResult("fingerprint", "skipped");
         }
+      } else if (payload.system && payload.messages && !shouldApplyFix("fingerprint")) {
+        debugLog("SKIPPED: fingerprint fix disabled via env var");
       }
 
       // Bug 6: Identity string normalization for Agent()/SendMessage() cache parity
@@ -931,7 +1185,7 @@ globalThis.fetch = async function (url, options) {
       // turn even though system[2] (the actual instructions) is byte-identical.
       // Confirmed by @labzink via mitmproxy on #44724.
       // Opt-in because it's a model-perceivable behavior change (subagent thinks it's CC).
-      if (NORMALIZE_IDENTITY && payload.system && Array.isArray(payload.system)) {
+      if (NORMALIZE_IDENTITY && shouldApplyFix("identity") && payload.system && Array.isArray(payload.system)) {
         const CANONICAL = "You are Claude Code, Anthropic's official CLI for Claude.";
         const AGENT_SDK = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
         let normalized = 0;
@@ -949,6 +1203,9 @@ globalThis.fetch = async function (url, options) {
         if (normalized > 0) {
           modified = true;
           debugLog(`APPLIED: identity normalized on ${normalized} system block(s) (Agent SDK → Claude Code)`);
+          recordFixResult("identity", "applied");
+        } else {
+          recordFixResult("identity", "skipped");
         }
       }
 
@@ -971,7 +1228,7 @@ globalThis.fetch = async function (url, options) {
       // send cache_control without ttl (defaulting to 5m server-side).
       // The server honors whatever TTL the client requests — so we inject it.
       // Discovered by @TigerKay1926 on #42052 using our GrowthBook flag dump.
-      if (payload.system) {
+      if (payload.system && shouldApplyFix("ttl")) {
         let ttlInjected = 0;
         payload.system = payload.system.map((block) => {
           if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
@@ -996,7 +1253,12 @@ globalThis.fetch = async function (url, options) {
         if (ttlInjected > 0) {
           modified = true;
           debugLog(`APPLIED: 1h TTL injected on ${ttlInjected} cache_control block(s)`);
+          recordFixResult("ttl", "applied");
+        } else {
+          recordFixResult("ttl", "skipped");
         }
+      } else if (payload.system && !shouldApplyFix("ttl")) {
+        debugLog("SKIPPED: TTL injection disabled via env var");
       }
 
       if (modified) {
@@ -1199,6 +1461,7 @@ async function drainTTLFromClone(clone, model, quotaHeaders) {
           if (event.type === "message_start" && event.message?.usage) {
             const u = event.message.usage;
             startUsage = u;
+            _trackCacheRatio(u);
             const cc = u.cache_creation || {};
             const e1h = cc.ephemeral_1h_input_tokens ?? 0;
             const e5m = cc.ephemeral_5m_input_tokens ?? 0;

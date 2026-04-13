@@ -105,6 +105,67 @@ The module intercepts `globalThis.fetch` before Claude Code makes API calls to `
 
 All fixes are idempotent — if nothing needs fixing, the request passes through unmodified. The interceptor is read-only with respect to your conversation; it only normalizes the request structure before it hits the API.
 
+## Graduating from Fixes
+
+The interceptor serves three purposes with different lifecycles:
+
+| Purpose | Examples | When to disable |
+|---------|----------|-----------------|
+| **Bug fixes** | Block relocation, fingerprint, tool sort, TTL | When CC fixes the underlying bug — check the health line |
+| **Monitoring** | Quota tracking, microcompact detection, GrowthBook flags | Keep permanently — these detect future regressions |
+| **Optimizations** | Image stripping, output efficiency rewrite | Keep as long as they help your workflow |
+
+### Health status
+
+On first API call, the interceptor logs a health status line (requires `CACHE_FIX_DEBUG=1`):
+
+```
+cache-fix health: relocate=active(2h ago) fingerprint=dormant(5 clean sessions) tool_sort=active ttl=active identity=waiting
+```
+
+Status meanings:
+- **active(Xh ago)** — fix was applied recently
+- **dormant(N clean sessions)** — bug not detected in N resume sessions; CC may have fixed it
+- **safety-blocked(Nx)** — round-trip verification failed; CC changed its algorithm, fix auto-disabled
+- **waiting** — fix hasn't been triggered yet
+
+When a fix shows `dormant`, you can safely disable it:
+```bash
+export CACHE_FIX_SKIP_RELOCATE=1  # example
+```
+
+To disable all fixes but keep monitoring:
+```bash
+export CACHE_FIX_DISABLED=1
+```
+
+### Regression detection
+
+If cache_read ratio drops below 50% across 5+ calls after disabling fixes, you'll see:
+```
+REGRESSION WARNING: cache_read ratio averaged 12% across last 5 calls.
+Fixes are disabled — consider re-enabling to recover cache performance.
+```
+
+## Safety
+
+### Fingerprint round-trip verification
+
+Before rewriting the `cc_version` fingerprint, the interceptor verifies that its
+hardcoded salt and character indices reproduce the fingerprint Claude Code sent.
+If verification fails (CC changed its algorithm), the rewrite is skipped automatically.
+This ensures the interceptor can never make cache performance *worse* than stock CC.
+
+### Fail-safe design
+
+Every fix is designed to fail to a no-op:
+- If block detection regexes don't match → blocks aren't relocated (CC behavior)
+- If fingerprint format changes → fingerprint isn't rewritten (CC behavior)
+- If tool sort produces no changes → payload passes through untouched
+- If TTL injection target structure changes → TTL isn't injected (CC behavior)
+
+The interceptor can only *help* or *do nothing*. It cannot make things worse.
+
 ## Status line — quota warnings in real time
 
 The interceptor writes quota state to `~/.claude/quota-status.json` on every API call. The included `tools/quota-statusline.sh` script reads this file and displays a live status line in Claude Code showing:
@@ -341,6 +402,12 @@ Snapshots are saved to `~/.claude/cache-fix-snapshots/` and diff reports are gen
 | `CACHE_FIX_IMAGE_KEEP_LAST` | `0` | Keep images in last N user messages (0 = disabled) |
 | `CACHE_FIX_OUTPUT_EFFICIENCY_REPLACEMENT` | unset | Replace Claude Code's `# Output efficiency` system-prompt section before the request is sent |
 | `CACHE_FIX_USAGE_LOG` | `~/.claude/usage.jsonl` | Path for per-call usage telemetry log |
+| `CACHE_FIX_DISABLED` | `0` | Disable all bug fixes; keep monitoring + optimizations active |
+| `CACHE_FIX_SKIP_RELOCATE` | `0` | Skip block relocation fix (Bug 1) |
+| `CACHE_FIX_SKIP_FINGERPRINT` | `0` | Skip fingerprint stabilization (Bug 2b) |
+| `CACHE_FIX_SKIP_TOOL_SORT` | `0` | Skip tool ordering stabilization (Bug 2a) |
+| `CACHE_FIX_SKIP_TTL` | `0` | Skip 1h TTL injection (Bug 5) |
+| `CACHE_FIX_SKIP_IDENTITY` | `0` | Skip identity normalization (Bug 6) |
 
 ## Limitations
 
