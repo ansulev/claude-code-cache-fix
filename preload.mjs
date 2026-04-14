@@ -189,6 +189,20 @@ function isRelocatableBlock(text) {
     isMcpBlock(text)
   );
 }
+/**
+ * Detect /clear command artifacts that bleed into the next session's messages[0].
+ * These blocks break prefix cache because a post-/clear session has different
+ * messages[0] content than a truly fresh session.
+ * Bug: anthropics/claude-code#47756
+ */
+function isClearArtifact(text) {
+  if (typeof text !== "string") return false;
+  return (
+    text.startsWith("<local-command-caveat>") ||
+    text.startsWith("<command-name>") ||
+    text.startsWith("<local-command-stdout>")
+  );
+}
 
 /**
  * Sort skill listing entries for deterministic ordering (prevents cache bust
@@ -331,6 +345,18 @@ function normalizeResumeMessages(messages) {
 
   const firstMsg = messages[firstUserIdx];
   if (!Array.isArray(firstMsg?.content)) return messages;
+
+  // FIX: Strip /clear command artifacts from messages[0] (anthropics/claude-code#47756).
+  // After /clear, CC leaves <local-command-caveat>, <command-name>/clear, and
+  // <local-command-stdout> blocks in messages[0] of the new session, breaking
+  // prefix match vs a truly fresh session.
+  const beforeClearStrip = firstMsg.content.length;
+  firstMsg.content = firstMsg.content.filter((block) => !isClearArtifact(block.text || ""));
+  if (firstMsg.content.length < beforeClearStrip) {
+    const stripped = beforeClearStrip - firstMsg.content.length;
+    debugLog(`APPLIED: stripped ${stripped} /clear artifact block(s) from messages[0]`);
+    recordFixResult("relocate", "applied");
+  }
 
   // FIX: Check if ANY relocatable blocks are scattered outside first user msg.
   // The old check (firstAlreadyHas → skip) missed partial scatter where some
@@ -1677,6 +1703,7 @@ export {
   isHooksBlock,
   isMcpBlock,
   isRelocatableBlock,
+  isClearArtifact,
   rewriteOutputEfficiencyInstruction,
   normalizeOutputEfficiencyReplacement,
   _pinnedBlocks,  // exported so tests can reset between runs
