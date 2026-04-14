@@ -6,9 +6,33 @@
 input=$(cat)
 
 JSONL="$HOME/.claude/claude-meter.jsonl"
+QS="$HOME/.claude/quota-status.json"
 
+# Primary source: claude-meter.jsonl (requires claude-code-meter package)
+# Fallback: quota-status.json (written by claude-code-cache-fix interceptor)
 if [ -f "$JSONL" ]; then
   last=$(tail -1 "$JSONL" 2>/dev/null)
+elif [ -f "$QS" ]; then
+  # Translate quota-status.json into the same shape the Python expects
+  last=$(python3 -c "
+import json, pathlib
+qs = json.load(open(pathlib.Path.home() / '.claude' / 'quota-status.json'))
+fh = qs.get('five_hour', {})
+sd = qs.get('seven_day', {})
+print(json.dumps({
+    'q5h': fh.get('utilization', 0),
+    'q7d': sd.get('utilization', 0),
+    'q5h_reset': fh.get('resets_at', 0),
+    'q7d_reset': sd.get('resets_at', 0),
+    'qoverage': qs.get('overage_status', ''),
+    'ts': qs.get('timestamp', ''),
+}))
+" 2>/dev/null)
+else
+  exit 0
+fi
+
+if [ -z "$last" ]; then exit 0; fi
 
   result=$(echo "$last" | python3 -c "
 import sys, json
@@ -83,4 +107,3 @@ print(label)
 " 2>/dev/null)
 
   [ -n "$result" ] && echo "$result"
-fi
