@@ -104,29 +104,60 @@ The wrapper dynamically resolves your npm global root, constructs a `file:///` U
 
 Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335) contributed the Windows wrapper and validated the interceptor across a 7.5-hour, 536-call Opus 4.6 session on Windows — 98.4% cache hit rate, 81% of calls had fingerprint instability that the interceptor corrected.
 
-## VS Code Extension (experimental)
+## VS Code Extension
 
-If you use Claude Code through the VS Code extension rather than the CLI, you may be able to load the interceptor via VS Code settings:
+The VS Code Claude Code extension spawns `claude.exe` / `claude` as a subprocess. The `claude-code.environmentVariables` setting does **not** propagate `NODE_OPTIONS` to the spawned process, so a process wrapper is required.
+
+### Linux / macOS
+
+Create a wrapper script (e.g. `~/bin/claude-vscode-wrapper`):
+
+```bash
+#!/bin/bash
+NPM_ROOT="$(npm root -g 2>/dev/null)"
+PRELOAD="$NPM_ROOT/claude-code-cache-fix/preload.mjs"
+shift  # VS Code passes the original claude path as $1
+export NODE_OPTIONS="--import $PRELOAD"
+exec node "$NPM_ROOT/@anthropic-ai/claude-code/cli.js" "$@"
+```
+
+```bash
+chmod +x ~/bin/claude-vscode-wrapper
+```
+
+Add to VS Code `settings.json`:
 
 ```json
 {
-  "claude-code.environmentVariables": {
-    "NODE_OPTIONS": "--import /path/to/claude-code-cache-fix/preload.mjs"
-  }
+  "claudeCode.claudeProcessWrapper": "/home/YOUR_USERNAME/bin/claude-vscode-wrapper"
 }
 ```
 
-Replace `/path/to` with your npm global root (`npm root -g`). Example for a typical Linux setup:
+### Windows
+
+On Windows, `.bat` and `.cmd` wrappers fail because the extension uses `child_process.spawn()` without `shell: true`. A native `.exe` wrapper is required.
+
+A C wrapper source (`tools/claude-vscode-wrapper.c`) is included in this package. Compile with MSVC or gcc:
+
+```cmd
+cl tools\claude-vscode-wrapper.c /Fe:claude-vscode-wrapper.exe
+```
+
+Then add to VS Code `settings.json`:
 
 ```json
 {
-  "claude-code.environmentVariables": {
-    "NODE_OPTIONS": "--import /home/username/.npm-global/lib/node_modules/claude-code-cache-fix/preload.mjs"
-  }
+  "claudeCode.claudeProcessWrapper": "C:\\path\\to\\claude-vscode-wrapper.exe"
 }
 ```
 
-**Status: needs community testing.** We've confirmed the `claude-code.environmentVariables` setting exists but haven't verified it propagates `NODE_OPTIONS` to the CC subprocess. If you test this, please report back on [#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16).
+See [#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16) for community testing results and pre-compiled binaries when available.
+
+### Known limitations (VS Code)
+
+- **Fingerprint fix**: The VS Code extension constructs `messages[0]` differently than the CLI, causing the fingerprint safety check to auto-disable. Use `CACHE_FIX_SKIP_FINGERPRINT=1` as a workaround. The relocate and TTL fixes work normally.
+
+Credit: [@JEONG-JIWOO](https://github.com/JEONG-JIWOO) and [@X-15](https://github.com/X-15) for the VS Code extension investigation and C wrapper ([#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16)).
 
 ## How it works
 
@@ -547,6 +578,8 @@ measurable signature of cache-efficiency degradation.
 - **[@TomTheMenace](https://github.com/TomTheMenace)** — Windows `.bat` wrapper for the interceptor, first Windows platform validation (7.5h/536-call Opus 4.6 session, 98.4% cache hit rate, 81% fingerprint instability corrected)
 - **[@arjansingh](https://github.com/arjansingh)** — nvm-compatible wrapper script with dynamic `npm root -g` path resolution (PR #15)
 - **[@beekamai](https://github.com/beekamai)** — Windows URL-encoding fix for `claude-fixed.bat` when npm root contains spaces (PR #17)
+- **[@JEONG-JIWOO](https://github.com/JEONG-JIWOO)** — VS Code extension investigation: discovered `claudeCode.claudeProcessWrapper` as the working integration path, wrote the C wrapper for Windows (#16)
+- **[@X-15](https://github.com/X-15)** — VS Code extension validation, per-fix health status analysis confirming safety check behavior on v2.1.105 (#16)
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 
