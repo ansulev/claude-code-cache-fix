@@ -266,6 +266,7 @@ Add to `~/.claude/settings.json`:
 ```json
 {
   "statusLine": {
+    "type": "command",
     "command": "~/.claude/hooks/quota-statusline.sh"
   }
 }
