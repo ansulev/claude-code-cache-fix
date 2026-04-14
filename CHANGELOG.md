@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.2 (2026-04-14)
+
+- **`/clear` artifact stripping** — Removes `<local-command-caveat>`, `<command-name>`, and `<local-command-stdout>` blocks that bleed into `messages[0]` after `/clear`, breaking prefix cache match vs a fresh session. Credit: [@wadabum](https://github.com/wadabum) (anthropics/claude-code#47756).
+- **Status line fallback to `quota-status.json`** — `quota-statusline.sh` now works without `claude-code-meter` installed by reading quota data from the interceptor's `quota-status.json`. Fixes #18. Credit: [@dmurat](https://github.com/dmurat).
+- **VS Code extension** — VSIX extension available for one-click activation. Auto-configures `claudeProcessWrapper`. No manual wrapper scripts or C compilation needed. Credit: [@JEONG-JIWOO](https://github.com/JEONG-JIWOO), [@X-15](https://github.com/X-15) (#16). Download: [GitHub Releases](https://github.com/cnighswonger/claude-code-cache-fix-vscode/releases/latest).
+- **README: VS Code section rewritten** — VSIX as Option A (recommended), manual wrapper as Option B. Documents `claudeCode.claudeProcessWrapper` as the correct integration path.
+
 ## 1.9.1 (2026-04-13)
 
 - **Windows: URL-encode npm root in `claude-fixed.bat`** — Fixes `ERR_MODULE_NOT_FOUND` on default Windows Node.js installs where npm root contains spaces (e.g. `C:\Program Files\nodejs\node_modules`). Uses PowerShell `[System.Uri]::EscapeUriString` to encode the path; no-op on space-free paths. Credit: [@beekamai](https://github.com/beekamai) (PR #17).

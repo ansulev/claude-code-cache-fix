@@ -106,11 +106,26 @@ Credit: [@TomTheMenace](https://github.com/anthropics/claude-code/issues/38335) 
 
 ## VS Code Extension
 
-The VS Code Claude Code extension spawns `claude.exe` / `claude` as a subprocess. The `claude-code.environmentVariables` setting does **not** propagate `NODE_OPTIONS` to the spawned process, so a process wrapper is required.
+### Option A: VSIX extension (recommended)
 
-### Linux / macOS
+The easiest path — a VS Code extension that handles everything automatically:
 
-Create a wrapper script (e.g. `~/bin/claude-vscode-wrapper`):
+1. Install the interceptor: `npm install -g claude-code-cache-fix`
+2. Download the VSIX from [GitHub Releases](https://github.com/cnighswonger/claude-code-cache-fix-vscode/releases/latest)
+3. Install: `code --install-extension claude-code-cache-fix-0.1.0.vsix`
+   (or in VS Code: Extensions → `...` menu → "Install from VSIX...")
+4. Restart any active Claude Code session
+
+The extension auto-configures `claudeCode.claudeProcessWrapper` on activation. No manual settings needed. Works on Windows, macOS, and Linux.
+
+Commands available in the VS Code command palette:
+- **Claude Code Cache Fix: Enable** / **Disable** / **Show Status**
+
+### Option B: Manual wrapper (if you prefer not to install the VSIX)
+
+The VS Code Claude Code extension spawns `claude.exe` / `claude` as a subprocess. The `claude-code.environmentVariables` setting does **not** propagate `NODE_OPTIONS`, so a process wrapper is required.
+
+**Linux / macOS** — create `~/bin/claude-vscode-wrapper`:
 
 ```bash
 #!/bin/bash
@@ -133,17 +148,13 @@ Add to VS Code `settings.json`:
 }
 ```
 
-### Windows
-
-On Windows, `.bat` and `.cmd` wrappers fail because the extension uses `child_process.spawn()` without `shell: true`. A native `.exe` wrapper is required.
-
-A C wrapper source (`tools/claude-vscode-wrapper.c`) is included in this package. Compile with MSVC or gcc:
+**Windows** — `.bat`/`.cmd` wrappers fail because the extension uses `child_process.spawn()` without `shell: true`. Use the C wrapper source included in this package (`tools/claude-vscode-wrapper.c`):
 
 ```cmd
 cl tools\claude-vscode-wrapper.c /Fe:claude-vscode-wrapper.exe
 ```
 
-Then add to VS Code `settings.json`:
+Then set in VS Code `settings.json`:
 
 ```json
 {
@@ -151,11 +162,9 @@ Then add to VS Code `settings.json`:
 }
 ```
 
-See [#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16) for community testing results and pre-compiled binaries when available.
-
 ### Known limitations (VS Code)
 
-- **Fingerprint fix**: The VS Code extension constructs `messages[0]` differently than the CLI, causing the fingerprint safety check to auto-disable. Use `CACHE_FIX_SKIP_FINGERPRINT=1` as a workaround. The relocate and TTL fixes work normally.
+- **Fingerprint fix auto-disables**: The VS Code extension constructs `messages[0]` differently than the CLI, causing the fingerprint safety check to trip. Use `CACHE_FIX_SKIP_FINGERPRINT=1` as a workaround. All other fixes (relocate, tool sort, TTL, /clear artifact strip) work normally.
 
 Credit: [@JEONG-JIWOO](https://github.com/JEONG-JIWOO) and [@X-15](https://github.com/X-15) for the VS Code extension investigation and C wrapper ([#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16)).
 
