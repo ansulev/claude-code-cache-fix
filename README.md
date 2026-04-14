@@ -2,7 +2,19 @@
 
 English | [中文](./README.zh.md) | [Português](./docs/guia-pt-br.md)
 
-Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.97.
+Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.107.
+
+## Security model
+
+> **This interceptor patches `globalThis.fetch`.** By design, it has full read/write access to all API requests and responses in the Claude Code process. This is inherent to the approach — any fetch interceptor, proxy, or gateway has this position.
+
+**What it does:** Modifies outgoing request structure (block order, fingerprint, TTL, git-status) to fix cache bugs. Reads response headers and SSE usage data for monitoring.
+
+**What it does NOT do:** No network calls from the interceptor. All telemetry is written to local files under `~/.claude/`. No data leaves your machine unless you explicitly opt in to [claude-code-meter](https://github.com/cnighswonger/claude-code-meter) sharing (separate package, requires interactive consent).
+
+**Supply chain:** Single unminified file (`preload.mjs`, ~1,700 lines). One dependency (`zod` for schema validation in tests only). Review before installing. npm provenance links each published version to its source commit.
+
+**Independent audit:** [Assessed as "LEGITIMATE TOOL"](https://github.com/anthropics/claude-code/issues/38335#issuecomment-4244413605) by @TheAuditorTool (2026-04-14).
 
 ## The problem
 

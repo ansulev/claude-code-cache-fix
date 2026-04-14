@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.10.0 (2026-04-14)
+
+Security transparency release.
+
+- **Postinstall security notice** — On `npm install`, displays a clear notice that the interceptor has full read/write access to API requests, confirms all telemetry is local-only, and links to source and independent audit.
+- **First-run security log** — On first API call, logs the security posture to the debug log alongside the health status line.
+- **Security Model section in README** — Moved to top of README. Documents the MITM position, what the interceptor does and does not do, supply chain profile, and links the independent audit by @TheAuditorTool.
+- **Confirmed through v2.1.107** — salt and fingerprint indices unchanged.
+
 ## 1.9.2 (2026-04-14)
 
 - **`/clear` artifact stripping** — Removes `<local-command-caveat>`, `<command-name>`, and `<local-command-stdout>` blocks that bleed into `messages[0]` after `/clear`, breaking prefix cache match vs a fresh session. Credit: [@wadabum](https://github.com/wadabum) (anthropics/claude-code#47756).

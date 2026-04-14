@@ -870,6 +870,7 @@ function printHealthLine() {
   if (FIXES_DISABLED) {
     debugLog("HEALTH: all fixes disabled via CACHE_FIX_DISABLED=1 (monitoring active)");
   }
+  debugLog("SECURITY: This interceptor has full read/write access to API requests. All telemetry is local only — no network calls. Source: github.com/cnighswonger/claude-code-cache-fix");
 }
 
 // --------------------------------------------------------------------------
