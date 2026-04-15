@@ -128,14 +128,37 @@ function stabilizeFingerprint(system, messages) {
 
   // --- SAFETY: Round-trip verification ---
   // Verify our salt/indices reproduce CC's fingerprint for the ORIGINAL
-  // message text (messages[0] content, which is what CC used).
-  // If our computation doesn't match, our constants are stale — skip rewrite.
-  const originalText = extractFirstMessageText(messages);
-  const verification = computeFingerprint(originalText, baseVersion);
-  if (verification !== oldFingerprint) {
+  // message text that CC used.
+  //
+  // Prior to v2.1.108, CC computed the fingerprint from messages[0] content
+  // (including meta/attachment blocks). Starting in v2.1.108, CC switched to
+  // an internal `!isMeta` filter (HoY function), which skips synthetic
+  // system-reminder blocks. In the API payload, this is equivalent to finding
+  // the first text block that doesn't start with "<system-reminder>".
+  //
+  // We try both extraction methods: the new "real user message" first (v2.1.108+),
+  // then fall back to the legacy "first message text" for older versions.
+  // This keeps the safety check working across CC versions.
+  //
+  // Discovered by @ArkNill via mitmproxy + CC source analysis on v2.1.108.
+  const realText = extractRealUserMessageText(messages);
+  const realVerification = computeFingerprint(realText, baseVersion);
+  const legacyText = extractFirstMessageText(messages);
+  const legacyVerification = computeFingerprint(legacyText, baseVersion);
+
+  let verificationPassed = false;
+  if (realVerification === oldFingerprint) {
+    verificationPassed = true;
+    debugLog("FINGERPRINT VERIFY: matched via real user message text (v2.1.108+ path)");
+  } else if (legacyVerification === oldFingerprint) {
+    verificationPassed = true;
+    debugLog("FINGERPRINT VERIFY: matched via legacy messages[0] text (pre-v2.1.108 path)");
+  }
+
+  if (!verificationPassed) {
     debugLog(
       "FINGERPRINT SAFETY: round-trip verification failed.",
-      `CC sent '${oldFingerprint}', we computed '${verification}'.`,
+      `CC sent '${oldFingerprint}', real='${realVerification}', legacy='${legacyVerification}'.`,
       "Salt/indices may have changed in this CC version. Skipping rewrite."
     );
     recordFixResult("fingerprint", "safety_blocked");
@@ -143,8 +166,7 @@ function stabilizeFingerprint(system, messages) {
   }
   // --- END SAFETY ---
 
-  // Compute stable fingerprint from real user text
-  const realText = extractRealUserMessageText(messages);
+  // Compute stable fingerprint from real user text (already extracted above)
   const stableFingerprint = computeFingerprint(realText, baseVersion);
 
   if (stableFingerprint === oldFingerprint) return null; // already correct
