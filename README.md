@@ -178,7 +178,7 @@ Then set in VS Code `settings.json`:
 
 ### Known limitations (VS Code)
 
-- **Fingerprint fix auto-disables**: The VS Code extension constructs `messages[0]` differently than the CLI, causing the fingerprint safety check to trip. Use `CACHE_FIX_SKIP_FINGERPRINT=1` as a workaround. All other fixes (relocate, tool sort, TTL, /clear artifact strip) work normally.
+- **Fingerprint fix**: Fixed in v1.11.0 — the safety check now handles both the v2.1.108+ extraction method and the legacy method. No workaround needed. (Previously required `CACHE_FIX_SKIP_FINGERPRINT=1`.)
 
 Credit: [@JEONG-JIWOO](https://github.com/JEONG-JIWOO) and [@X-15](https://github.com/X-15) for the VS Code extension investigation and C wrapper ([#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16)).
 
@@ -604,6 +604,7 @@ measurable signature of cache-efficiency degradation.
 - **[@beekamai](https://github.com/beekamai)** — Windows URL-encoding fix for `claude-fixed.bat` when npm root contains spaces (PR #17)
 - **[@JEONG-JIWOO](https://github.com/JEONG-JIWOO)** — VS Code extension investigation: discovered `claudeCode.claudeProcessWrapper` as the working integration path, wrote the C wrapper for Windows (#16)
 - **[@X-15](https://github.com/X-15)** — VS Code extension validation, per-fix health status analysis confirming safety check behavior on v2.1.105 (#16)
+- **[@ArkNill](https://github.com/ArkNill)** — Fingerprint verification fix for CC v2.1.108+ (`isMeta` filter change, PR #21), Korean README (PR #22), original [claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis) research
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 

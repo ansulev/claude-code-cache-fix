@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.0 (2026-04-15)
+
+- **Fingerprint verification fix for CC v2.1.108+** — CC v2.1.108 changed fingerprint computation to skip `<system-reminder>` blocks via an `isMeta` filter. The safety check now tries both the new extraction method (v2.1.108+) and the legacy method, keeping fingerprint stabilization working across CC versions. `CACHE_FIX_SKIP_FINGERPRINT=1` workaround is no longer needed. Credit: [@ArkNill](https://github.com/ArkNill) (PR #21).
+- **Korean README** — Full setup and usage guide in Korean (README.ko.md). Credit: [@ArkNill](https://github.com/ArkNill) (PR #22).
+
 ## 1.10.0 (2026-04-14)
 
 Security transparency release.
