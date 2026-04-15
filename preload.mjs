@@ -680,6 +680,7 @@ const DEBUG = process.env.CACHE_FIX_DEBUG === "1";
 const PREFIXDIFF = process.env.CACHE_FIX_PREFIXDIFF === "1";
 const NORMALIZE_IDENTITY = process.env.CACHE_FIX_NORMALIZE_IDENTITY === "1";
 const STRIP_GIT_STATUS = process.env.CACHE_FIX_STRIP_GIT_STATUS === "1";
+const NORMALIZE_CWD = process.env.CACHE_FIX_NORMALIZE_CWD === "1";
 const TTL_MAIN = (process.env.CACHE_FIX_TTL_MAIN || "1h").toLowerCase();
 const TTL_SUBAGENT = (process.env.CACHE_FIX_TTL_SUBAGENT || "1h").toLowerCase();
 const LOG_PATH = join(homedir(), ".claude", "cache-fix-debug.log");
@@ -724,6 +725,7 @@ const _STATS_SCHEMA = {
   ttl: { applied: 0, skipped: 0, lastApplied: null },
   identity: { applied: 0, skipped: 0, lastApplied: null },
   git_status: { applied: 0, skipped: 0, lastApplied: null },
+  cwd_normalize: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1301,6 +1303,47 @@ globalThis.fetch = async function (url, options) {
           recordFixResult("git_status", "applied");
         } else {
           recordFixResult("git_status", "skipped");
+        }
+      }
+
+      // Optimization: normalize CWD and path references in system prompt
+      // CC injects the full working directory path, additional directories, and
+      // path references into system text blocks. These change per project/worktree,
+      // busting the prefix cache across different working directories.
+      // Opt-in via CACHE_FIX_NORMALIZE_CWD=1.
+      // The model can still discover paths via Bash (pwd, ls) when needed.
+      if (NORMALIZE_CWD && shouldApplyFix("cwd_normalize") && payload.system && Array.isArray(payload.system)) {
+        let normalized = 0;
+        payload.system = payload.system.map((block) => {
+          if (block?.type !== "text" || typeof block.text !== "string") return block;
+          let newText = block.text;
+          // Normalize "Primary working directory: /path/to/project"
+          newText = newText.replace(
+            /( - Primary working directory: ).+/g,
+            "$1[normalized by cache-fix]"
+          );
+          // Normalize "Additional working directories:" section
+          newText = newText.replace(
+            /( - Additional working directories:\n)((?:  - .+\n)*)/g,
+            "$1  - [normalized by cache-fix]\n"
+          );
+          // Normalize "Contents of /path/to/..." in claudeMd/memory references
+          newText = newText.replace(
+            /Contents of \/[^\s(]+/g,
+            "Contents of [path normalized by cache-fix]"
+          );
+          if (newText !== block.text) {
+            normalized++;
+            return { ...block, text: newText };
+          }
+          return block;
+        });
+        if (normalized > 0) {
+          modified = true;
+          debugLog(`APPLIED: CWD/paths normalized in ${normalized} system block(s)`);
+          recordFixResult("cwd_normalize", "applied");
+        } else {
+          recordFixResult("cwd_normalize", "skipped");
         }
       }
 
