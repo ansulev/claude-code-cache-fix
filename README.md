@@ -4,7 +4,7 @@
 
 English | [中文](./README.zh.md) | [한국어](./README.ko.md) | [Português](./docs/guia-pt-br.md)
 
-Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.107.
+Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.111. Opus 4.7 model supported.
 
 ## Security model
 
