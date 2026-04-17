@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.1 (2026-04-17)
+
+- **`cache_control_sticky`** — Preserves historical `cache_control` marker positions across turns. CC maintains one user-side marker at a time, dropping previous positions (~43 bytes of JSON framing per dropped position). On long sessions this causes tail-of-message byte drift that invalidates downstream cached blocks. This extension tracks up to 3 historical marker positions by stable message hash and reinstates them on subsequent turns. Runs after `cache_control_normalize`. Credit: [@deafsquad](https://github.com/deafsquad) (PR #33).
+
+16 total cache-stability fixes. 160 tests.
+
 ## 2.0.0 (2026-04-17)
 
 Major release — 7 new cache-stability fixes, expanding the interceptor from 8 fixes to 15. Combined stack reduces first-request cache creation by up to 99.8% on affected accounts (940K → 1.7K tokens measured by @deafsquad). Confirmed compatible with CC v2.1.112 and Opus 4.7.
