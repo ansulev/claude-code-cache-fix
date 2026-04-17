@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.0.0 (2026-04-17)
+
+Major release — 7 new cache-stability fixes, expanding the interceptor from 8 fixes to 15. Combined stack reduces first-request cache creation by up to 99.8% on affected accounts (940K → 1.7K tokens measured by @deafsquad). Confirmed compatible with CC v2.1.112 and Opus 4.7.
+
+### New fixes
+
+- **`smoosh_split`** — Universal un-smoosh: peels any trailing `<system-reminder>` content out of `tool_result.content` strings back into standalone text blocks. Reverses CC's `smooshSystemReminderSiblings` folding that causes per-turn byte drift in tool results. Defaults ON. Credit: [@deafsquad](https://github.com/deafsquad) (PR #26).
+- **`session_start_normalize`** — Rewrites `SessionStart:resume` → `:startup`, strips `<session-id>` and `Last active:` timestamps that differ between startup and resume, eliminating content drift at `messages[0]` block 0. Credit: [@deafsquad](https://github.com/deafsquad) (PR #27). Targets anthropics/claude-code#43657.
+- **`continue_trailer_strip`** — Removes the `"Continue from where you left off."` text block CC injects on `--continue` that changes the prefix shape vs a normal turn. Credit: [@deafsquad](https://github.com/deafsquad) (PR #28).
+- **`deferred_tools_restore`** — Snapshots the MCP deferred-tools block and restores it on reconnect race, preventing cache bust when MCP disconnects and reconnects mid-session with different content. Credit: [@deafsquad](https://github.com/deafsquad) (PR #29).
+- **`reminder_strip`** — Drops Token usage / USD budget / output tokens / TodoWrite / turn-counter bookkeeping `<system-reminder>` blocks that change every turn. Credit: [@deafsquad](https://github.com/deafsquad) (PR #30).
+- **`cache_control_normalize`** — Pins the `cache_control` marker at a canonical position to stop per-turn drift when CC moves the marker between blocks. Credit: [@deafsquad](https://github.com/deafsquad) (PR #31).
+- **`tool_use_input_normalize`** — Strips non-schema keys from `tool_use.input` and canonicalizes key order to schema declaration order. CC's serialization of past `tool_use` blocks can drift between turns when the caller passes extra fields not in `input_schema.properties` — a 2334-byte drift on a single block caused a 620K-token cache miss. New miss class identified live on 2026-04-17. Credit: [@deafsquad](https://github.com/deafsquad) (PR #32).
+
+### Existing fixes (from beta series)
+
+- **`smoosh_normalize`** — Pattern-based normalization of 4 known dynamic system-reminder values (token_usage, budget_usd, output_token_usage, todo_reminder) in both smooshed and unsmooshed form. Opt-in via `CACHE_FIX_NORMALIZE_SMOOSH=1`.
+- **`cwd_normalize`** — Replaces volatile CWD and path references in system prompt with stable placeholders for cross-worktree cache reuse. Opt-in via `CACHE_FIX_NORMALIZE_CWD=1`. Credit: [@wadabum](https://github.com/wadabum) for the architectural analysis (anthropics/claude-code#48236).
+
+### Opus 4.7 advisory
+
+Metered data shows Opus 4.7 burns Q5h at ~2.4x the rate of 4.6 due to invisible adaptive thinking tokens not reported in the API usage response. Workaround: `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` (may reduce quality). See [Discussion #25](https://github.com/cnighswonger/claude-code-cache-fix/discussions/25).
+
+### Contributors
+
+This release adds [@deafsquad](https://github.com/deafsquad) as contributor #10 — source-level function attribution of the resume scatter bug, OTEL telemetry discovery, and 7 PRs (#26-32) providing universal cache-stability coverage.
+
 ## 1.11.0 (2026-04-15)
 
 - **Fingerprint verification fix for CC v2.1.108+** — CC v2.1.108 changed fingerprint computation to skip `<system-reminder>` blocks via an `isMeta` filter. The safety check now tries both the new extraction method (v2.1.108+) and the legacy method, keeping fingerprint stabilization working across CC versions. `CACHE_FIX_SKIP_FINGERPRINT=1` workaround is no longer needed. Credit: [@ArkNill](https://github.com/ArkNill) (PR #21).
