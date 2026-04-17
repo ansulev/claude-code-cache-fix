@@ -726,6 +726,7 @@ const _STATS_SCHEMA = {
   identity: { applied: 0, skipped: 0, lastApplied: null },
   git_status: { applied: 0, skipped: 0, lastApplied: null },
   cwd_normalize: { applied: 0, skipped: 0, lastApplied: null },
+  smoosh_normalize: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1344,6 +1345,62 @@ globalThis.fetch = async function (url, options) {
           recordFixResult("cwd_normalize", "applied");
         } else {
           recordFixResult("cwd_normalize", "skipped");
+        }
+      }
+
+      // Optimization: normalize smooshed dynamic system-reminders in tool_result content
+      // CC's smooshSystemReminderSiblings (messages.ts:1835) folds <system-reminder> text
+      // blocks into tool_result.content strings. Dynamic values (token_usage, budget_usd,
+      // output_token_usage, todo_reminder) change every turn, causing mid-history cache
+      // busts even without resume or attachment scatter.
+      // Bug: anthropics/claude-code#49585 (deafsquad)
+      // Opt-in via CACHE_FIX_NORMALIZE_SMOOSH=1.
+      if (process.env.CACHE_FIX_NORMALIZE_SMOOSH === "1" && shouldApplyFix("smoosh_normalize") && payload.messages) {
+        let smooshNormalized = 0;
+        const smooshPatterns = [
+          // Token usage: 12345/50000; 37655 remaining
+          /(<system-reminder>\nToken usage: )\d+\/\d+; \d+ remaining/g,
+          // USD budget: $1.23/$10.00; $8.77 remaining
+          /(<system-reminder>\nUSD budget: )\$[\d.]+\/\$[\d.]+; \$[\d.]+ remaining/g,
+          // Output tokens — turn: 1,234 / 5,000 · session: 12,345
+          /(<system-reminder>\nOutput tokens \u2014 turn: )[\d,./\s]+ \u00b7 session: [\d,]+/g,
+          // TodoWrite reminder with variable todo list content
+          /(<system-reminder>\nThe TodoWrite tool hasn't been used recently\..*?)(\n\nHere are the existing contents of your todo list:\n\n\[[\s\S]*?\])?(\n<\/system-reminder>)/g,
+        ];
+        const smooshReplacements = [
+          "$1[normalized]/[normalized]; [normalized] remaining",
+          "$1$[normalized]/$[normalized]; $[normalized] remaining",
+          "$1[normalized] \u00b7 session: [normalized]",
+          "$1$3",  // strip the variable todo list, keep the static reminder text
+        ];
+
+        for (const msg of payload.messages) {
+          if (msg.role !== "user") continue;
+          // Handle both string content (smooshed tool_result) and array content
+          if (Array.isArray(msg.content)) {
+            for (let i = 0; i < msg.content.length; i++) {
+              const block = msg.content[i];
+              // Smooshed tool_result with string content
+              if (block.type === "tool_result" && typeof block.content === "string" && block.content.includes("<system-reminder>")) {
+                let newContent = block.content;
+                for (let p = 0; p < smooshPatterns.length; p++) {
+                  smooshPatterns[p].lastIndex = 0; // reset regex state
+                  newContent = newContent.replace(smooshPatterns[p], smooshReplacements[p]);
+                }
+                if (newContent !== block.content) {
+                  msg.content[i] = { ...block, content: newContent };
+                  smooshNormalized++;
+                }
+              }
+            }
+          }
+        }
+        if (smooshNormalized > 0) {
+          modified = true;
+          debugLog(`APPLIED: smoosh-normalized ${smooshNormalized} tool_result block(s) with dynamic system-reminders`);
+          recordFixResult("smoosh_normalize", "applied");
+        } else {
+          recordFixResult("smoosh_normalize", "skipped");
         }
       }
 
