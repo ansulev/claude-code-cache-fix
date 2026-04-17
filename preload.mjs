@@ -727,6 +727,7 @@ const _STATS_SCHEMA = {
   git_status: { applied: 0, skipped: 0, lastApplied: null },
   cwd_normalize: { applied: 0, skipped: 0, lastApplied: null },
   smoosh_normalize: { applied: 0, skipped: 0, lastApplied: null },
+  smoosh_split: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1413,6 +1414,63 @@ globalThis.fetch = async function (url, options) {
           recordFixResult("smoosh_normalize", "applied");
         } else {
           recordFixResult("smoosh_normalize", "skipped");
+        }
+      }
+
+      // Extension: smoosh_split — universal un-smoosh, complements smoosh_normalize.
+      // CC's smooshSystemReminderSiblings (messages.ts:1835) folds any
+      // `<system-reminder>`-prefixed text block adjacent to a tool_result
+      // into that tool_result's content string with a leading `\n\n`.
+      // The existing smoosh_normalize above stabilizes bytes for 4 enumerated
+      // patterns (Token usage, USD budget, Output tokens, TodoWrite), but
+      // hook-injected reminders (thinking-enrichment, action-tracker, MCP
+      // deltas, custom user hooks) don't match those patterns and still drift.
+      // smoosh_split peels any trailing `\n\n<system-reminder>...\n</system-reminder>`
+      // off tool_result.content strings and restores it as a standalone text
+      // block — the pre-smoosh shape. Dynamic drift in the peeled reminder
+      // lives in a small block instead of a multi-KB tool_result string.
+      // Composed with smoosh_normalize: normalize stabilizes known patterns
+      // in-place; split peels any remainder. Full universal coverage.
+      // Bug: anthropics/claude-code#49585
+      // Opt-out via CACHE_FIX_SKIP_SMOOSH_SPLIT=1 (defaults ON).
+      if (shouldApplyFix("smoosh_split") && payload.messages) {
+        const TRAILING_SMOOSH_TAIL = /\n\n(<system-reminder>\n(?:(?!<\/system-reminder>)[\s\S])*?\n<\/system-reminder>)\s*$/;
+        let splitApplied = 0;
+        for (const msg of payload.messages) {
+          if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
+          const out = [];
+          let mutated = false;
+          const peeledReminders = [];
+          for (const block of msg.content) {
+            if (block?.type === "tool_result" && typeof block.content === "string") {
+              const reminders = [];
+              let s = block.content;
+              while (true) {
+                const m = s.match(TRAILING_SMOOSH_TAIL);
+                if (!m) break;
+                reminders.unshift(m[1]);
+                s = s.slice(0, m.index);
+              }
+              if (reminders.length > 0) {
+                out.push({ ...block, content: s });
+                for (const r of reminders) peeledReminders.push({ type: "text", text: r });
+                splitApplied += reminders.length;
+                mutated = true;
+                continue;
+              }
+            }
+            out.push(block);
+          }
+          // Peeled reminders go AFTER all other blocks so tool_results stay
+          // consecutive (avoids API 400 "tool use concurrency" errors).
+          if (mutated) msg.content = [...out, ...peeledReminders];
+        }
+        if (splitApplied > 0) {
+          modified = true;
+          debugLog(`APPLIED: smoosh-split peeled ${splitApplied} trailing system-reminder(s) from tool_result.content`);
+          recordFixResult("smoosh_split", "applied");
+        } else {
+          recordFixResult("smoosh_split", "skipped");
         }
       }
 
