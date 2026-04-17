@@ -330,6 +330,64 @@ function stripSessionKnowledge(text) {
   );
 }
 
+// --------------------------------------------------------------------------
+// SessionStart:resume → :startup rewrite (Bug: anthropics/claude-code#43657)
+// --------------------------------------------------------------------------
+//
+// On `claude --continue`, CC fires processSessionStartHooks('resume', …) at
+// src/utils/sessionStart.ts:35. The resulting attachment text wraps the
+// hook's stdout in `<system-reminder>\nSessionStart:resume hook success: …`.
+// The original (pre-resume) session sent the same block as
+// `SessionStart:startup hook success: …`. Byte difference at msg[0] content[N]
+// → whole message prefix re-caches → full-session-cost miss.
+//
+// Some SessionStart hooks additionally embed `<session-id>` tags or
+// `Last active: <timestamp>` lines inside the reminder body, both of which
+// carry UUID/date volatility on top of the event-name flip.
+//
+// This helper rewrites the outbound text to match the originally-cached
+// form. Runs on both standalone text blocks and tool_result.content strings
+// (covers the case where the SessionStart reminder got smooshed by CC's
+// smooshSystemReminderSiblings pass before we see it).
+//
+// Agent behavior is unaffected — CC does not condition behavior on the
+// event-name text, and session-id / timestamps are ephemeral runtime
+// metadata, not semantic inputs.
+// --------------------------------------------------------------------------
+
+const SESSION_START_RESUME_MARKER = /SessionStart:resume hook success:/g;
+const SESSION_START_ID_TAG = /\n?<session-id>[^<]*<\/session-id>/g;
+const SESSION_START_LAST_ACTIVE_LINE = /\nLast active:[^\n]*/g;
+
+/**
+ * Normalize a single text payload (a text block's .text or a tool_result's
+ * string .content) to remove SessionStart-resume volatility. Returns
+ * [newText, mutationCount]. Callers only need the text, but the count is
+ * exposed for stats. The function is a pure string-to-string transform
+ * (idempotent: running twice produces the same output as running once).
+ */
+function normalizeSessionStartText(text) {
+  if (typeof text !== "string" || !text.includes("SessionStart:")) return [text, 0];
+  let count = 0;
+  let out = text;
+  if (SESSION_START_RESUME_MARKER.test(out)) {
+    SESSION_START_RESUME_MARKER.lastIndex = 0;
+    out = out.replace(SESSION_START_RESUME_MARKER, "SessionStart:startup hook success:");
+    count++;
+  }
+  if (SESSION_START_ID_TAG.test(out)) {
+    SESSION_START_ID_TAG.lastIndex = 0;
+    out = out.replace(SESSION_START_ID_TAG, "");
+    count++;
+  }
+  if (SESSION_START_LAST_ACTIVE_LINE.test(out)) {
+    SESSION_START_LAST_ACTIVE_LINE.lastIndex = 0;
+    out = out.replace(SESSION_START_LAST_ACTIVE_LINE, "");
+    count++;
+  }
+  return [out, count];
+}
+
 /**
  * Core fix: on EVERY call, scan the entire message array for the LATEST
  * relocatable blocks (skills, MCP, deferred tools, hooks) and ensure they
@@ -728,6 +786,7 @@ const _STATS_SCHEMA = {
   cwd_normalize: { applied: 0, skipped: 0, lastApplied: null },
   smoosh_normalize: { applied: 0, skipped: 0, lastApplied: null },
   smoosh_split: { applied: 0, skipped: 0, lastApplied: null },
+  session_start_normalize: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1349,6 +1408,44 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
+      // Extension: session_start_normalize — SessionStart:resume → :startup rewrite
+      // and ephemeral session-id / Last-active strip. Runs BEFORE smoosh_normalize
+      // so drift at msg[0] content[N] is stabilized before any subsequent pass
+      // reads from the same text. Applies to both standalone text blocks and
+      // tool_result.content strings (in case CC's smooshSystemReminderSiblings
+      // folded the reminder before we see it).
+      // Bug: anthropics/claude-code#43657
+      // Opt-out via CACHE_FIX_SKIP_SESSION_START_NORMALIZE=1 (defaults ON).
+      if (shouldApplyFix("session_start_normalize") && payload.messages) {
+        let ssnApplied = 0;
+        for (const msg of payload.messages) {
+          if (msg?.role !== "user" || !Array.isArray(msg.content)) continue;
+          for (let i = 0; i < msg.content.length; i++) {
+            const block = msg.content[i];
+            if (block?.type === "text" && typeof block.text === "string") {
+              const [t, n] = normalizeSessionStartText(block.text);
+              if (n > 0) {
+                msg.content[i] = { ...block, text: t };
+                ssnApplied += n;
+              }
+            } else if (block?.type === "tool_result" && typeof block.content === "string") {
+              const [c, n] = normalizeSessionStartText(block.content);
+              if (n > 0) {
+                msg.content[i] = { ...block, content: c };
+                ssnApplied += n;
+              }
+            }
+          }
+        }
+        if (ssnApplied > 0) {
+          modified = true;
+          debugLog(`APPLIED: session-start-normalize rewrote ${ssnApplied} marker(s)`);
+          recordFixResult("session_start_normalize", "applied");
+        } else {
+          recordFixResult("session_start_normalize", "skipped");
+        }
+      }
+
       // Optimization: normalize smooshed dynamic system-reminders in tool_result content
       // CC's smooshSystemReminderSiblings (messages.ts:1835) folds <system-reminder> text
       // blocks into tool_result.content strings. Dynamic values (token_usage, budget_usd,
@@ -1899,5 +1996,6 @@ export {
   isClearArtifact,
   rewriteOutputEfficiencyInstruction,
   normalizeOutputEfficiencyReplacement,
+  normalizeSessionStartText,
   _pinnedBlocks,  // exported so tests can reset between runs
 };
