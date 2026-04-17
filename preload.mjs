@@ -752,9 +752,10 @@ function normalizeToolUseInputsInBody(body) {
 //
 // This sticky extension maintains per-session state tracking where markers
 // have appeared in prior turns, and reinstates them on future turns as
-// additive preservation. Up to 3 historical message-level markers are
+// additive preservation. Up to 2 historical message-level markers are
 // tracked (Anthropic's hard limit is 4 cache_control markers total — 1 for
-// system[2] + 3 for message-level breakpoints). When a historical position
+// system[2] + 1 canonical from cache_control_normalize + 2 historical from
+// sticky = 4). When a historical position
 // would exceed the cap, the oldest tracked entry is dropped (LRU).
 //
 // Messages are identified by a stable hash so that compaction rewrites /
@@ -772,7 +773,10 @@ function normalizeToolUseInputsInBody(body) {
 // --------------------------------------------------------------------------
 
 const CACHE_CONTROL_STICKY_DIR = join(homedir(), ".claude", "cache-fix-state");
-const CACHE_CONTROL_STICKY_MAX_POSITIONS = 3;
+// Anthropic hard limit: 4 cache_control markers total per request.
+// CC uses 1 on system[2] + cache_control_normalize places 1 on last user msg = 2 reserved.
+// Sticky can use at most 2 historical positions to stay within the 4-marker cap.
+const CACHE_CONTROL_STICKY_MAX_POSITIONS = 2;
 const CACHE_CONTROL_STICKY_DEFAULT_MARKER = { type: "ephemeral", ttl: "1h" };
 
 /**
@@ -2354,7 +2358,7 @@ globalThis.fetch = async function (url, options) {
       // the tail of each new user turn, the previous position loses the ~43
       // bytes of cache_control framing — a tail-of-message byte drift that
       // breaks every downstream cached block. This extension tracks marker
-      // positions by stable message-hash across turns (up to 3) and re-adds
+      // positions by stable message-hash across turns (up to 2) and re-adds
       // them on future bodies. Runs AFTER cache_control_normalize (when
       // present) so normalize pins the canonical tail-marker first and
       // sticky re-adds the historical ones. State file is per-project at

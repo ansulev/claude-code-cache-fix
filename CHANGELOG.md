@@ -1,8 +1,12 @@
 # Changelog
 
+## 2.0.2 (2026-04-17)
+
+- **BUGFIX: `cache_control_sticky` exceeded Anthropic's 4-marker limit** — Reduced `MAX_POSITIONS` from 3 to 2. With 1 system marker + 1 canonical from `cache_control_normalize` + 3 historical = 5, exceeding Anthropic's hard limit of 4 `cache_control` blocks per request. Caused `400 invalid_request_error` on sessions with enough history to fill all 3 slots. Now: 1 system + 1 canonical + 2 historical = 4.
+
 ## 2.0.1 (2026-04-17)
 
-- **`cache_control_sticky`** — Preserves historical `cache_control` marker positions across turns. CC maintains one user-side marker at a time, dropping previous positions (~43 bytes of JSON framing per dropped position). On long sessions this causes tail-of-message byte drift that invalidates downstream cached blocks. This extension tracks up to 3 historical marker positions by stable message hash and reinstates them on subsequent turns. Runs after `cache_control_normalize`. Credit: [@deafsquad](https://github.com/deafsquad) (PR #33).
+- **`cache_control_sticky`** — Preserves historical `cache_control` marker positions across turns. CC maintains one user-side marker at a time, dropping previous positions (~43 bytes of JSON framing per dropped position). On long sessions this causes tail-of-message byte drift that invalidates downstream cached blocks. This extension tracks up to 2 historical marker positions by stable message hash and reinstates them on subsequent turns (2 historical + 1 canonical from normalize + 1 system = 4, Anthropic's hard limit). Runs after `cache_control_normalize`. Credit: [@deafsquad](https://github.com/deafsquad) (PR #33).
 
 16 total cache-stability fixes. 160 tests.
 

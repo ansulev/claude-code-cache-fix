@@ -78,26 +78,24 @@ test("cache_control_sticky: subsequent body where CC removed the marker → mark
   assert.equal(firstMsgMuts[0].blockIdx, 0);
 });
 
-test("cache_control_sticky: caps at MAX_POSITIONS, drops oldest (LRU)", () => {
-  assert.equal(CACHE_CONTROL_STICKY_MAX_POSITIONS, 3);
-  // Build a body carrying 4 historical markers — one more than cap.
+test("cache_control_sticky: caps at MAX_POSITIONS (2), drops oldest (LRU)", () => {
+  assert.equal(CACHE_CONTROL_STICKY_MAX_POSITIONS, 2);
+  // Build a body carrying 3 historical markers — one more than cap.
   const body = {
     messages: [
       makeUserText("m1", EPHEMERAL_1H),
       makeUserText("m2", EPHEMERAL_1H),
       makeUserText("m3", EPHEMERAL_1H),
-      makeUserText("m4", EPHEMERAL_1H),
     ],
   };
   const r = updateCacheControlStickyState(body, { version: 1, positions: [] });
-  assert.equal(r.newState.positions.length, 3);
+  assert.equal(r.newState.positions.length, 2);
   // LRU: keep the newest (end-of-list). Compute expected hashes:
   const hashM2 = computeStickyMessageHash(makeUserText("m2"));
   const hashM3 = computeStickyMessageHash(makeUserText("m3"));
-  const hashM4 = computeStickyMessageHash(makeUserText("m4"));
   assert.deepEqual(
     r.newState.positions.map((p) => p.msg_hash),
-    [hashM2, hashM3, hashM4]
+    [hashM2, hashM3]
   );
 });
 
