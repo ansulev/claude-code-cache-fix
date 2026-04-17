@@ -4,7 +4,7 @@
 
 English | [中文](./README.zh.md) | [한국어](./README.ko.md) | [Português](./docs/guia-pt-br.md)
 
-Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.111. Opus 4.7 compatible.
+Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.112. Opus 4.7 compatible.
 
 > **Opus 4.7 advisory:** Our metered data shows 4.7 burns Q5h quota at **~2.4x the rate of 4.6** for equivalent visible token counts. Two factors: a new tokenizer (up to 35% more tokens, [documented](https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7)) and adaptive thinking overhead (~105%, not documented in usage response). Workaround: `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` (may reduce quality). Image stripping (`CACHE_FIX_IMAGE_KEEP_LAST`) is even more important on 4.7 due to high-res image support increasing image token counts. See [Discussion #25](https://github.com/cnighswonger/claude-code-cache-fix/discussions/25) for full analysis.
 
