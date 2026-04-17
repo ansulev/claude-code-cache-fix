@@ -388,6 +388,43 @@ function normalizeSessionStartText(text) {
   return [out, count];
 }
 
+// --------------------------------------------------------------------------
+// Continue-trailer strip (Bug: anthropics/claude-code#12 / resume UX)
+// --------------------------------------------------------------------------
+//
+// On `claude --continue`, CC appends a text block whose text is EXACTLY
+// "Continue from where you left off." to the last user message before
+// firing the first post-resume request. The pre-exit body did not carry
+// that block, so its presence in the resumed body creates a tail-of-last-
+// user-message drift (~40 bytes plus JSON framing) that breaks cache at
+// that position.
+//
+// The trailer is a semantic no-op — the agent already has the full prior
+// conversation as context. Removing it makes the post-resume body byte-
+// match what the pre-exit body cached at the tail.
+//
+// Match is intentionally narrow (exact string equality on the block's
+// .text) so mentions of the phrase inside a longer user sentence don't
+// get caught.
+// --------------------------------------------------------------------------
+
+const CONTINUE_TRAILER_TEXT = "Continue from where you left off.";
+
+/**
+ * Returns true iff the block is an exact-match Continue-trailer text block
+ * (a `{type: "text", text: "Continue from where you left off."}` shape —
+ * cache_control field on the same block is allowed and ignored). Pure
+ * predicate; exported for unit tests.
+ */
+function isContinueTrailerBlock(block) {
+  return (
+    !!block &&
+    typeof block === "object" &&
+    block.type === "text" &&
+    block.text === CONTINUE_TRAILER_TEXT
+  );
+}
+
 /**
  * Core fix: on EVERY call, scan the entire message array for the LATEST
  * relocatable blocks (skills, MCP, deferred tools, hooks) and ensure they
@@ -787,6 +824,7 @@ const _STATS_SCHEMA = {
   smoosh_normalize: { applied: 0, skipped: 0, lastApplied: null },
   smoosh_split: { applied: 0, skipped: 0, lastApplied: null },
   session_start_normalize: { applied: 0, skipped: 0, lastApplied: null },
+  continue_trailer_strip: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1571,6 +1609,36 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
+      // Extension: continue_trailer_strip — remove the "Continue from where
+      // you left off." text block CC appends to the last user message on
+      // --continue. Pre-exit bodies didn't carry it, so its presence in the
+      // resumed body creates tail-of-last-msg drift that breaks cache.
+      // Exact-match string equality on `.text` — user sentences mentioning
+      // the phrase inside longer content are not touched.
+      // Bug: anthropics/claude-code#12 (resume UX), observed empirically.
+      // Opt-out via CACHE_FIX_SKIP_CONTINUE_TRAILER_STRIP=1 (defaults ON).
+      if (shouldApplyFix("continue_trailer_strip") && payload.messages) {
+        let trailerStripped = 0;
+        for (const msg of payload.messages) {
+          if (msg?.role !== "user" || !Array.isArray(msg.content)) continue;
+          const kept = msg.content.filter((block) => {
+            if (isContinueTrailerBlock(block)) {
+              trailerStripped++;
+              return false;
+            }
+            return true;
+          });
+          if (kept.length !== msg.content.length) msg.content = kept;
+        }
+        if (trailerStripped > 0) {
+          modified = true;
+          debugLog(`APPLIED: continue-trailer-strip removed ${trailerStripped} trailer block(s)`);
+          recordFixResult("continue_trailer_strip", "applied");
+        } else {
+          recordFixResult("continue_trailer_strip", "skipped");
+        }
+      }
+
       // Bug 5: TTL enforcement (configurable per request type)
       // The client gates 1h cache TTL behind a GrowthBook allowlist that checks
       // querySource against patterns like "repl_main_thread*", "sdk", "auto_mode".
@@ -1997,5 +2065,7 @@ export {
   rewriteOutputEfficiencyInstruction,
   normalizeOutputEfficiencyReplacement,
   normalizeSessionStartText,
+  isContinueTrailerBlock,
+  CONTINUE_TRAILER_TEXT,
   _pinnedBlocks,  // exported so tests can reset between runs
 };
