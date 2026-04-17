@@ -246,3 +246,54 @@ test("cache_control_sticky: hash is null for messages with no identifiable conte
 test("cache_control_sticky: default marker constant is ephemeral/1h", () => {
   assert.deepEqual(CACHE_CONTROL_STICKY_DEFAULT_MARKER, { type: "ephemeral", ttl: "1h" });
 });
+
+test("cache_control_sticky: respects 4-marker hard limit when body already has markers", () => {
+  // CC uses 3 markers itself (2 system + 1 messages). Sticky has 2 tracked
+  // positions but budget is only 1 — must not exceed 4 total.
+  const historicalHash1 = computeStickyMessageHash(makeUserText("hist1"));
+  const historicalHash2 = computeStickyMessageHash(makeUserText("hist2"));
+  const body = {
+    system: [
+      { type: "text", text: "sys1", cache_control: EPHEMERAL_1H },
+      { type: "text", text: "sys2", cache_control: EPHEMERAL_1H },
+    ],
+    messages: [
+      makeUserText("hist1"),                   // sticky wants to add marker here
+      makeUserText("hist2"),                   // sticky wants to add marker here
+      makeUserText("current", EPHEMERAL_1H),   // CC's canonical marker (3rd existing)
+    ],
+  };
+  const prior = {
+    version: 1,
+    positions: [
+      { msg_hash: historicalHash1, position_hint: "last_block", marker: EPHEMERAL_1H },
+      { msg_hash: historicalHash2, position_hint: "last_block", marker: EPHEMERAL_1H },
+    ],
+  };
+  const r = updateCacheControlStickyState(body, prior);
+  // Only 1 mutation allowed (3 existing + 1 = 4 limit), not 2.
+  assert.equal(r.mutations.length, 1);
+});
+
+test("cache_control_sticky: zero budget when body already at 4 markers", () => {
+  const historicalHash = computeStickyMessageHash(makeUserText("hist"));
+  const body = {
+    system: [
+      { type: "text", text: "sys1", cache_control: EPHEMERAL_1H },
+      { type: "text", text: "sys2", cache_control: EPHEMERAL_1H },
+    ],
+    messages: [
+      makeUserText("hist"),
+      makeUserText("m1", EPHEMERAL_1H),
+      makeUserText("m2", EPHEMERAL_1H),
+    ],
+  };
+  const prior = {
+    version: 1,
+    positions: [
+      { msg_hash: historicalHash, position_hint: "last_block", marker: EPHEMERAL_1H },
+    ],
+  };
+  const r = updateCacheControlStickyState(body, prior);
+  assert.equal(r.mutations.length, 0);
+});

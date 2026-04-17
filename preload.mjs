@@ -942,10 +942,30 @@ function updateCacheControlStickyState(body, priorState) {
     capped = capped.slice(capped.length - CACHE_CONTROL_STICKY_MAX_POSITIONS);
   }
 
+  // Count existing cache_control markers across the entire body (system +
+  // messages) so sticky never pushes the total past Anthropic's hard limit
+  // of 4. CC may use 2 or 3 of those slots itself depending on version.
+  const ANTHROPIC_MARKER_LIMIT = 4;
+  let existingMarkers = 0;
+  if (Array.isArray(body.system)) {
+    for (const b of body.system) {
+      if (b && typeof b === "object" && b.cache_control) existingMarkers++;
+    }
+  }
+  for (const msg of body.messages) {
+    if (!msg || !Array.isArray(msg.content)) continue;
+    for (const b of msg.content) {
+      if (b && typeof b === "object" && b.cache_control) existingMarkers++;
+    }
+  }
+  const stickyBudget = Math.max(0, ANTHROPIC_MARKER_LIMIT - existingMarkers);
+
   // Compute mutations: for each tracked hash present in this body, if the
   // message doesn't already have any marker, add one at its last block.
+  // Stop once the sticky budget is exhausted.
   const mutations = [];
   for (const pos of capped) {
+    if (mutations.length >= stickyBudget) break;
     const msgIdx = hashToMsgIdx.get(pos.msg_hash);
     if (msgIdx === undefined) continue;
     const msg = body.messages[msgIdx];

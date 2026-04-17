@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.3 (2026-04-17)
+
+- **BUGFIX: `cache_control_sticky` still exceeded 4-marker limit on CC v2.1.112** — v2.0.2 reduced `MAX_POSITIONS` from 3→2 assuming CC uses exactly 2 markers (1 system + 1 messages). CC v2.1.112 uses 3 markers in some configurations, so 2 sticky + 3 CC = 5, still exceeding the hard limit. Fix: count all existing `cache_control` markers across the full body (system + messages) before adding sticky markers, and cap the total at 4. No more assumptions about CC's marker budget. Caused `400 invalid_request_error` in production.
+
+16 total cache-stability fixes. 162 tests.
+
 ## 2.0.2 (2026-04-17)
 
 - **BUGFIX: `cache_control_sticky` exceeded Anthropic's 4-marker limit** — Reduced `MAX_POSITIONS` from 3 to 2. With 1 system marker + 1 canonical from `cache_control_normalize` + 3 historical = 5, exceeding Anthropic's hard limit of 4 `cache_control` blocks per request. Caused `400 invalid_request_error` on sessions with enough history to fill all 3 slots. Now: 1 system + 1 canonical + 2 historical = 4.
