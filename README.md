@@ -607,6 +607,7 @@ measurable signature of cache-efficiency degradation.
 - **[@JEONG-JIWOO](https://github.com/JEONG-JIWOO)** — VS Code extension investigation: discovered `claudeCode.claudeProcessWrapper` as the working integration path, wrote the C wrapper for Windows (#16)
 - **[@X-15](https://github.com/X-15)** — VS Code extension validation, per-fix health status analysis confirming safety check behavior on v2.1.105 (#16)
 - **[@ArkNill](https://github.com/ArkNill)** — Fingerprint verification fix for CC v2.1.108+ (`isMeta` filter change, PR #21), Korean README (PR #22), original [claude-code-hidden-problem-analysis](https://github.com/ArkNill/claude-code-hidden-problem-analysis) research
+- **[@deafsquad](https://github.com/deafsquad)** — Universal smoosh_split un-smoosh fix (PR #26), source-level function attribution of resume scatter bug (anthropics/claude-code#43657), OTEL telemetry discovery
 
 If you contributed to the community effort on these issues and aren't listed here, please open an issue or PR — we want to credit everyone properly.
 
