@@ -1384,11 +1384,23 @@ globalThis.fetch = async function (url, options) {
               if (block.type === "tool_result" && typeof block.content === "string" && block.content.includes("<system-reminder>")) {
                 let newContent = block.content;
                 for (let p = 0; p < smooshPatterns.length; p++) {
-                  smooshPatterns[p].lastIndex = 0; // reset regex state
+                  smooshPatterns[p].lastIndex = 0;
                   newContent = newContent.replace(smooshPatterns[p], smooshReplacements[p]);
                 }
                 if (newContent !== block.content) {
                   msg.content[i] = { ...block, content: newContent };
+                  smooshNormalized++;
+                }
+              }
+              // Unsmooshed standalone text blocks with dynamic system-reminder content
+              if (block.type === "text" && typeof block.text === "string" && block.text.startsWith("<system-reminder>")) {
+                let newText = block.text;
+                for (let p = 0; p < smooshPatterns.length; p++) {
+                  smooshPatterns[p].lastIndex = 0;
+                  newText = newText.replace(smooshPatterns[p], smooshReplacements[p]);
+                }
+                if (newText !== block.text) {
+                  msg.content[i] = { ...block, text: newText };
                   smooshNormalized++;
                 }
               }
