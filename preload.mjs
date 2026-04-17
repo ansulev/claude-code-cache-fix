@@ -388,6 +388,85 @@ function normalizeSessionStartText(text) {
   return [out, count];
 }
 
+// --------------------------------------------------------------------------
+// Deferred-tools restore (MCP reconnect race)
+// --------------------------------------------------------------------------
+//
+// Observed empirically: on `claude --continue`, if MCP servers haven't
+// finished reconnecting by the time CC fires the first post-resume
+// request, the `<system-reminder>The following deferred tools are now
+// available via ToolSearch…` block at msg[0] (or wherever the attachment
+// lands post-compaction) shrinks dramatically. A full list of ~40 tools
+// collapses to a handful of CC built-ins (AskUserQuestion, EnterPlanMode,
+// ExitPlanMode, PushNotification) and CC injects a trailing
+// `The following deferred tools are no longer available (their MCP server
+// disconnected). Do not search for them — ToolSearch will return no match:`
+// notice.
+//
+// That block change at the root of the message array breaks cache at the
+// very top — the entire ~940K prompt re-caches. By the time the second
+// post-resume request fires, MCPs are usually reconnected and the block is
+// full again, but the cache is already committed to the shrunk version
+// for this session.
+//
+// This extension snapshots the block to
+// `~/.claude/cache-fix-state/deferred-tools-<sha1(key)>.txt` every time
+// it's sent in its full form (no UNAVAILABLE marker), keyed by a caller-
+// supplied project key (default: cwd). On a subsequent request where the
+// block is shorter AND contains the UNAVAILABLE marker, the persisted
+// full bytes are substituted so the on-wire body matches the server's
+// cached prefix.
+//
+// Trade-off: the restored block may reference MCP tools that haven't
+// actually reconnected yet. Agent calls ToolSearch → no match → one retry.
+// Tiny cost versus a full-prompt cache miss on every resume.
+// --------------------------------------------------------------------------
+
+const DEFERRED_TOOLS_AVAILABLE_MARKER =
+  "The following deferred tools are now available via ToolSearch";
+const DEFERRED_TOOLS_UNAVAILABLE_MARKER =
+  "The following deferred tools are no longer available";
+const DEFERRED_TOOLS_SNAPSHOT_DIR = join(homedir(), ".claude", "cache-fix-state");
+
+/**
+ * Build the absolute snapshot path for a given key. Exported for tests so
+ * they can assert on path derivation without duplicating the hash logic.
+ */
+function deferredToolsSnapshotPath(key) {
+  const hash = createHash("sha1").update(String(key)).digest("hex").slice(0, 16);
+  return join(DEFERRED_TOOLS_SNAPSHOT_DIR, `deferred-tools-${hash}.txt`);
+}
+
+/**
+ * Locate the deferred-tools reminder block anywhere in `body.messages`.
+ * The block's position varies by session shape (pre-compaction it often
+ * sits at `msg[0].content[0]`; post-compaction it can land at
+ * `msg[1].content[N]` next to other attachments). Returns
+ * `{ msgIdx, blockIdx, text } | null`.
+ *
+ * Assistant messages are skipped so that if the agent happens to mention
+ * the AVAILABLE_MARKER phrase verbatim in its own output, we don't
+ * misidentify it as a real deferred-tools block.
+ */
+function findDeferredToolsBlockInBody(body) {
+  if (!body || !Array.isArray(body.messages)) return null;
+  for (let m = 0; m < body.messages.length; m++) {
+    const msg = body.messages[m];
+    if (msg?.role !== "user" || !Array.isArray(msg.content)) continue;
+    for (let i = 0; i < msg.content.length; i++) {
+      const b = msg.content[i];
+      if (
+        b?.type === "text" &&
+        typeof b.text === "string" &&
+        b.text.includes(DEFERRED_TOOLS_AVAILABLE_MARKER)
+      ) {
+        return { msgIdx: m, blockIdx: i, text: b.text };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Core fix: on EVERY call, scan the entire message array for the LATEST
  * relocatable blocks (skills, MCP, deferred tools, hooks) and ensure they
@@ -787,6 +866,7 @@ const _STATS_SCHEMA = {
   smoosh_normalize: { applied: 0, skipped: 0, lastApplied: null },
   smoosh_split: { applied: 0, skipped: 0, lastApplied: null },
   session_start_normalize: { applied: 0, skipped: 0, lastApplied: null },
+  deferred_tools_restore: { applied: 0, skipped: 0, lastApplied: null },
 };
 
 function _createEmptyStats() {
@@ -1571,6 +1651,48 @@ globalThis.fetch = async function (url, options) {
         }
       }
 
+      // Extension: deferred_tools_restore — persist-and-restore the
+      // deferred-tools attachment block across sessions so MCP reconnect
+      // race at resume-time doesn't shrink msg[0] and bust the whole cache.
+      // Snapshot key defaults to process.cwd() (one snapshot per project).
+      // Opt-out via CACHE_FIX_SKIP_DEFERRED_TOOLS_RESTORE=1 (defaults ON).
+      if (shouldApplyFix("deferred_tools_restore") && payload.messages) {
+        let dtrRestored = 0;
+        const found = findDeferredToolsBlockInBody(payload);
+        if (found) {
+          const hasUnavail = found.text.includes(DEFERRED_TOOLS_UNAVAILABLE_MARKER);
+          const snapshotPath = deferredToolsSnapshotPath(process.cwd());
+          if (!hasUnavail) {
+            // Clean baseline — persist it for future resumes. Silent on
+            // any I/O error; snapshot is best-effort.
+            try {
+              mkdirSync(DEFERRED_TOOLS_SNAPSHOT_DIR, { recursive: true });
+              writeFileSync(snapshotPath, found.text, "utf-8");
+            } catch {}
+          } else {
+            // Shrunk block with explicit "no longer available" signal →
+            // attempt restore. Only substitute if the persisted version is
+            // strictly longer (never downgrade to a stale shorter snapshot).
+            let snapshot = null;
+            try { snapshot = readFileSync(snapshotPath, "utf-8"); } catch {}
+            if (snapshot && snapshot.length > found.text.length) {
+              const targetMsg = payload.messages[found.msgIdx];
+              const newContent = targetMsg.content.slice();
+              newContent[found.blockIdx] = { ...newContent[found.blockIdx], text: snapshot };
+              payload.messages[found.msgIdx] = { ...targetMsg, content: newContent };
+              dtrRestored = 1;
+            }
+          }
+        }
+        if (dtrRestored > 0) {
+          modified = true;
+          debugLog(`APPLIED: deferred-tools-restore substituted full block at msg[${found.msgIdx}].content[${found.blockIdx}]`);
+          recordFixResult("deferred_tools_restore", "applied");
+        } else {
+          recordFixResult("deferred_tools_restore", "skipped");
+        }
+      }
+
       // Bug 5: TTL enforcement (configurable per request type)
       // The client gates 1h cache TTL behind a GrowthBook allowlist that checks
       // querySource against patterns like "repl_main_thread*", "sdk", "auto_mode".
@@ -1997,5 +2119,9 @@ export {
   rewriteOutputEfficiencyInstruction,
   normalizeOutputEfficiencyReplacement,
   normalizeSessionStartText,
+  findDeferredToolsBlockInBody,
+  deferredToolsSnapshotPath,
+  DEFERRED_TOOLS_AVAILABLE_MARKER,
+  DEFERRED_TOOLS_UNAVAILABLE_MARKER,
   _pinnedBlocks,  // exported so tests can reset between runs
 };
