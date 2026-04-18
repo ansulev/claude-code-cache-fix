@@ -79,9 +79,10 @@ A Node.js HTTP server on loopback that:
 - **TLS.** The proxy listens on plain HTTP (loopback only). The outbound connection to `api.anthropic.com` uses HTTPS. Node's `https` module or `fetch` handles this.
 - **Header policy.** The proxy is transparent for end-to-end headers but must handle hop-by-hop headers correctly:
   - **Preserve (forward as-is):** `authorization`, `anthropic-version`, `anthropic-beta`, `anthropic-dangerous-direct-browser-access`, `content-type`, `accept`, `x-stainless-*`, `x-api-key`, all `anthropic-ratelimit-*` response headers
-  - **Recompute:** `host` (set to upstream hostname), `content-length` (recalculate after extension pipeline modifies body in Phase 3)
+  - **Recompute:** `host` (set to upstream hostname), `content-length` (recalculate after extension pipeline modifies body in Phase 3), `accept-encoding` (force `identity` — see Content-Encoding constraint)
   - **Strip on request:** `connection`, `keep-alive`, `transfer-encoding`, `proxy-*`, `te`, `upgrade`
   - **Strip on response:** `connection`, `keep-alive`, `transfer-encoding` (proxy manages its own chunked encoding to client)
+- **Content-Encoding.** The proxy must request identity encoding from upstream by setting `accept-encoding: identity` on the outbound request. SSE parsing in `stream.mjs` operates on line-delimited text — compressed responses (gzip, br) are not parseable without decompression. Forcing identity encoding avoids the need for a decompression layer while preserving the ability to parse `message_start` and `message_delta` events. If a future use case requires compressed upstream responses, add explicit decompression before the SSE parser, and strip/recompute `content-encoding` on the response to the client.
 - **Timeout.** CC sets `x-stainless-timeout: 600` (10 minutes). The proxy must not impose a shorter timeout.
 - **No auth handling.** The proxy forwards the `Authorization` header as-is. It never reads, stores, or logs API keys.
 - **No body logging.** Request and response bodies must never be logged by default. No prompt content, tool payloads, or response text in any log output. Debug mode (future) must use explicit redaction for any metadata logging. Authorization headers must never appear in logs under any mode.
