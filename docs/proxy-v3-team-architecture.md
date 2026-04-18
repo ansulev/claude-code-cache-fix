@@ -97,6 +97,7 @@ proxy/
 **server.mjs:**
 - `http.createServer()` on loopback
 - Route POST `/v1/messages` → pipeline → upstream → stream back
+- Route GET `/health` → 200 OK (used by launch wrapper readiness check)
 - All other paths → 404
 - Graceful shutdown on SIGTERM/SIGINT
 
@@ -168,7 +169,7 @@ bin/
 ```
 1. Parse args (--proxy-port, --proxy-upstream, passthrough args for claude)
 2. Fork proxy/server.mjs as a child process
-3. Wait for proxy health (HTTP GET to /health or TCP connect to port)
+3. Wait for proxy health (HTTP GET to /health → 200 OK)
 4. Spawn claude with ANTHROPIC_BASE_URL set, forwarding remaining args
 5. On claude exit → kill proxy, exit with claude's exit code
 6. On proxy exit → kill claude, exit with error
