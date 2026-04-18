@@ -16,7 +16,7 @@
 - Before any re-review, fetch the current PR head/ref first. Do not assume the previously viewed diff is still current.
 - Every PR review must leave a PR comment summarizing the review result.
 - Before taking any PR action, read the full existing PR comment thread so you do not act on stale or partial context.
-- PR review comments must clearly identify the agent posting them (e.g. `Codex review:` or `Proxy Builder review:`).
+- **All PR and issue comments must be prefixed with the agent name** (e.g. `Manager Agent:`, `Proxy Builder:`, `Codex review:`, `Proxy Test Agent:`). This is required for audit trail and cross-agent coordination.
 - PR review must explicitly check whether tests cover the changed execution path.
 - If there are blocking issues, post the findings in the PR comment and do not add an approval label.
 - If the work under review is a directive/spec only, post the plan review result and add `plan-approved` only when the directive is approved.
