@@ -53,8 +53,10 @@ Related: https://github.com/cnighswonger/claude-code-cache-fix/issues/40
 | 4 | Response capture (meter integration, headers, usage) | Phase 1 |
 | 5 | Detection module (#39 — structural fingerprinting, drift) | Phase 3 |
 | 6 | Remote telemetry (opt-in sanitized reporting) | Phase 5 |
-| 7 | Tests (unit + integration) | All phases |
+| 7 | Tests (per-phase, not deferred to end) | Each phase |
 | 8 | Proxy Test Agent validation (live CC traffic) | Phase 2 |
+
+**Testing strategy:** Each phase ships with its own tests. Phase 1 tests cover SSE framing, header normalization, upstream failure propagation, client disconnect handling, and health endpoint. Phase 2 tests cover lifecycle management, signal forwarding, and port conflict detection. Tests are not deferred to the end — critical-path behavior is validated as each subsystem lands.
 
 ---
 
@@ -83,6 +85,7 @@ A Node.js HTTP server on loopback that:
 - **Timeout.** CC sets `x-stainless-timeout: 600` (10 minutes). The proxy must not impose a shorter timeout.
 - **No auth handling.** The proxy forwards the `Authorization` header as-is. It never reads, stores, or logs API keys.
 - **No body logging.** Request and response bodies must never be logged by default. No prompt content, tool payloads, or response text in any log output. Debug mode (future) must use explicit redaction for any metadata logging. Authorization headers must never appear in logs under any mode.
+- **Cancellation and abort propagation.** Client disconnect (CC closes connection) must tear down the upstream request immediately — no orphaned outbound requests. Upstream abort (api.anthropic.com drops connection mid-stream) must propagate to the client as a stream error, not hang. Wrapper shutdown (SIGTERM) must abort both in-flight proxy connections and the CC child process. Use `AbortController`/`AbortSignal` on the upstream `fetch` or `https.request` and listen for `close` events on the client socket.
 
 ### Proposed Implementation
 
