@@ -108,8 +108,11 @@ proxy/
 **stream.mjs:**
 - Reads chunks from upstream response stream
 - Writes to client response with backpressure (`res.write()` + drain events)
-- Parses SSE `data:` lines to extract the usage object from `message_delta` events (for Phase 4)
-- Does NOT buffer the full response — processes chunk by chunk
+- Parses SSE `data:` lines for two event types:
+  - `message_start` — captures initial usage object (cache_read, cache_creation, input_tokens) and model identifier (requested vs served for spoofing detection)
+  - `message_delta` — captures final usage object (output_tokens, stop_reason) to complete the per-request telemetry record
+- Both extractions are bounded reads from parsed JSON — no full-response buffering
+- Telemetry record assembled from: response headers (quota, cache tier, rate limits) + `message_start` usage + `message_delta` usage — matching the existing `preload.mjs` capture behavior
 
 **config.mjs:**
 - `CACHE_FIX_PROXY_PORT` (default: 9801)
