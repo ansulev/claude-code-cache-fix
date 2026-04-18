@@ -2,7 +2,7 @@
 
 Issues we are actively monitoring, have commented on, or are directly relevant to our interceptor work.
 
-Last updated: 2026-04-10 (afternoon — v1.6.2 release)
+Last updated: 2026-04-18 (post v2.0.3 release, v2.1.113 Bun migration)
 
 ## Legend
 
@@ -53,6 +53,29 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | [#33949](https://github.com/anthropics/claude-code/issues/33949) | SSE streaming hangs indefinitely | Open | Root cause analysis with fix proposals. Affects session stability. |
 | [#34556](https://github.com/anthropics/claude-code/issues/34556) | Persistent memory across context compactions | Open | 59 compactions documented. Related to our memory/CLAUDE.md approach. |
 
+## CRITICAL: v2.1.112 / v2.1.113 — context window cut + preload death (Apr 17)
+
+| # | Title | State | Why it matters |
+|---|-------|-------|---------------|
+| [#50083](https://github.com/anthropics/claude-code/issues/50083) | 1M context window silently removed for Max 5x in v2.1.112 | Open | Server-side `context-1m-2025-08-07` experiment flag revoked. Recurring pattern (Mar 26, Apr 13, Apr 17). Workaround: `DISABLE_COMPACT=1` + `CLAUDE_CODE_MAX_CONTEXT_TOKENS=1000000` (v2.1.112 only). Cross-linked from #41082, #44403, #47549. |
+| [#49585](https://github.com/anthropics/claude-code/issues/49585) | Per-turn smoosh pipeline folds dynamic system-reminders | Open | Our primary thread. deafsquad posted comprehensive v2.1.112/v2.1.113 impact analysis (Apr 17). v2.0.3 shipped to fix sticky marker overflow. |
+
+### Our repo issues
+
+| # | Title | State | Why it matters |
+|---|-------|-------|---------------|
+| [#35](https://github.com/cnighswonger/claude-code-cache-fix/issues/35) | v2.1.113 removes cli.js | Open | Bun binary replaces Node.js. `--import` preload dead. deafsquad proposed proxy via `ANTHROPIC_BASE_URL`. wadabum raised concern about subscription auth compatibility. |
+| [#36](https://github.com/cnighswonger/claude-code-cache-fix/issues/36) | Microcompact rewrites bust cache prefix on idle sessions | Open | `time_based_microcompact` clears old tool results, changing prefix bytes. Reported by Jonathan via contact form. |
+| [#39](https://github.com/cnighswonger/claude-code-cache-fix/issues/39) | Upstream change detection — alert on CC-originated changes | Open | Fingerprint request structure, alert on drift. Remote telemetry option for enterprise. cc @deafsquad. |
+
+## Engaged — new since Apr 10
+
+| # | Title | State | Our involvement |
+|---|-------|-------|-----------------|
+| [#47098](https://github.com/anthropics/claude-code/issues/47098) | New sessions will NEVER hit a full cache | Open | Posted interceptor layer coverage breakdown (Apr 17). wadabum cross-linked #50085 (attribution header). |
+| [#38335](https://github.com/anthropics/claude-code/issues/38335) | Max plan limits exhausted abnormally fast | Open | Posted v2.1.113 proxy path forward (Apr 18). 466+ comments mega-thread. |
+| [#42796](https://github.com/anthropics/claude-code/issues/42796) | Claude Code unusable for complex engineering (Feb updates) | Closed | OP is Stella Laurenzo (AMD AI team). Adaptive thinking regression. fgrosswig referenced re: 4.7 changes. |
+
 ## NEW: v2.1.101 regression cluster (Apr 10 evening)
 
 | # | Title | State | Why it matters |
@@ -101,8 +124,23 @@ Last updated: 2026-04-10 (afternoon — v1.6.2 release)
 | @molu0219 | Rigorous cache_read quota accounting analysis (#45756). Measured 103.9M raw tokens, hypothesized cache_read counts at full rate for quota. |
 | @triphase-physics | Max 20x billing routing bypass — 100% Extra Usage, subscription untouched (#45249). |
 | @odgriff79 | OAuth-only billing misclassification — CC treating Max as API billing (#45572). |
-| @fgrosswig ([claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard)) | Self-hosted forensic dashboard for Claude Code usage. v1.4.0 (2026-04-11) documented forced-session-restart mechanism (~490K tokens per event at quota cap), compaction cache wipe (78-91% cache destroyed at each compaction), and quadratic cost scaling (8-12x by turn 500+). Independent replication of forced-restart verified in our usage.jsonl. Includes scrub script for log sanitization. Complementary to our interceptor's vantage point. |
+| @fgrosswig ([claude-usage-dashboard](https://github.com/fgrosswig/claude-usage-dashboard)) | Self-hosted forensic dashboard + private `claude-gateway` proxy. Model spoofing discovery (76 silent Haiku transitions), 12.5x A/B burn rate test (4.6 vs 4.7), session lifecycle charting. Private repo collaborator. |
 | @Hisham-Hussein | Surfaced the v2.1.81 pin workaround on 2026-04-11 morning in #38335 — "pin to v2.1.81 for pre-March-23 behavior." Kicked off the cross-version investigation that produced the ScheduleWakeup 5m TTL finding and the March 23 server-side regression hypothesis. |
+| @deafsquad | 7 PRs (#26-33) shipped in v2.0.0/v2.0.1: smoosh_split, session_start_normalize, continue_trailer_strip, deferred_tools_restore, reminder_strip, cache_control_normalize, tool_use_input_normalize, cache_control_sticky. Proposed and built proxy architecture for v3.0.0 (post-Bun migration). 1400+ message production session validating v2.0.3. |
+| @wadabum | Cache layer analysis (#47098), attribution header discovery (#50085), `ANTHROPIC_BASE_URL` subscription auth concern (#35). Key architectural thinker. |
+| @cowwoc | First to report v2.1.113 Bun binary switch (#35). Suggested proxy refactor. |
+| @stellaraccident | AMD AI team lead. Filed #42796 (Claude Code unusable for complex engineering). High-visibility signal on adaptive thinking regression. |
+
+## Media Coverage
+
+| Source | Title | Date |
+|--------|-------|------|
+| [The Register](https://www.theregister.com/2026/04/13/claude_code_cache_confusion/) | Claude quota drain not caused by cache tweaks | Apr 13 |
+| [DevOps.com](https://devops.com/claude-code-quota-limits-usage-problems/) | Developers Using Claude Code Hit by Token Drain Crisis | Apr 2026 |
+| [paddo.dev](https://paddo.dev/blog/anthropic-trust-erosion/) | The Trust Tax: Anthropic's Worst Month | Apr 2026 |
+| [Medium/@marianski.jacek](https://medium.com/@marianski.jacek/claude-code-cache-crisis-a-complete-reverse-engineering-analysis-9a6f4e03fae4) | Claude Code Cache Crisis: A Complete Reverse-Engineering Analysis | Apr 2026 |
+| [SmartScope](https://smartscope.blog/en/blog/claude-code-token-consumption-cache-bug/) | Why Claude Code Burns Through Tokens So Fast | Apr 2026 |
+| [devclass](https://www.devclass.com/ai-ml/2026/04/14/claude-code-cache-confusion-as-anthropic-tweaks-defaults-but-quotas-still-drain/5216975) | Claude Code cache confusion as Anthropic tweaks defaults | Apr 14 |
 
 ---
 
