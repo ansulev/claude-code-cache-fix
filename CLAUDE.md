@@ -1,5 +1,71 @@
 # CLAUDE.md — claude-code-cache-fix
 
+## Git Workflow
+
+- **Do not push directly to `main` unless the user explicitly instructs you to do so in the current turn.** Otherwise use feature branches and PRs, even for small fixes.
+- If writing directly to `main` is explicitly authorized, pull/rebase from `origin/main` before any other write action so you start from the current remote tip.
+- Branch naming: `feature/<name>` for features, `fix/<name>` for bugfixes.
+- PRs require review before merge.
+- Commit messages: lead with what changed and why, not how.
+- Multi-phase issues: use `Ref #N` (not `Closes #N`) until the final phase PR.
+
+## Review Workflow
+
+- For PR review work: findings first, approval only if there are no blocking issues.
+- Review mindset: optimize for finding what could break, regress, mislead, or remain untested. Do not approve because a change sounds reasonable.
+- Before any re-review, fetch the current PR head/ref first. Do not assume the previously viewed diff is still current.
+- Every PR review must leave a PR comment summarizing the review result.
+- Before taking any PR action, read the full existing PR comment thread so you do not act on stale or partial context.
+- PR review comments must clearly identify the agent posting them (e.g. `Codex review:` or `Proxy Builder review:`).
+- PR review must explicitly check whether tests cover the changed execution path.
+- If there are blocking issues, post the findings in the PR comment and do not add an approval label.
+- If the work under review is a directive/spec only, post the plan review result and add `plan-approved` only when the directive is approved.
+- Review and approval labels are markers of review state, not substitutes for review comments.
+
+## PR Labels
+
+Review labels (directive/spec stage):
+- `reviewed-by-code-agent` — Implementation agent has reviewed, no blocking findings
+- `reviewed-by-codex-agent` — Codex has reviewed, no blocking findings
+- `reviewed-by-lead` — Project lead has reviewed
+
+Approval labels (final implementation sign-off):
+- `approved-by-code-agent` — Implementation agent approves for merge
+- `approved-by-codex-agent` — Codex approves for merge
+- `approved-by-lead` — Project lead approves for merge
+
+Workflow state labels:
+- `plan-approved` — directive/spec approved; implementation may begin
+- `directive-stage` — PR is in directive/spec review; remove when implementation begins
+- `implementation-stage` — PR is in implementation
+- `changes-requested` — blocking findings remain
+- `ready-for-merge` — all required `approved-by-*` labels present, no blockers
+- `needs-sim-validation` — requires integration testing with live CC traffic
+- `schema-change` — changes affect extension pipeline interface, telemetry format, or config schema
+
+Policy:
+- `reviewed-by-*` labels are for the directive/spec stage.
+- `approved-by-*` labels are the final implementation sign-off. Must be paired with a review comment.
+- `plan-approved` allows implementation to begin but does not mean the PR is merge-ready.
+- `ready-for-merge` requires `approved-by-codex-agent` and `approved-by-lead`. Must not coexist with `changes-requested`.
+- Each agent owns only their own review and approval labels. No agent may add or remove another agent's labels.
+- Codex should communicate desired shared-label changes in the review comment unless the user explicitly asks Codex to apply them.
+
+## Agent Roles
+
+- **Project Lead** (Manager session) — strategic decisions, requirements, community coordination. Does not write implementation code.
+- **Proxy Builder** (CC teammate) — implements on feature branches. Commits directive to branch, opens PR, submits for review before implementing.
+- **Codex Review Agent** (external, OpenAI Codex) — independent code reviewer. Reviews on PRs, writes reports to `docs/code-reviews/` in the codex workspace.
+- **Proxy Test Agent** — dedicated integration testing agent. Validates proxy with live CC traffic.
+
+## Cross-LLM Review
+
+Significant implementation plans and code go to the Codex Review Agent before merging. Skip for hotfixes; always for infrastructure and new features. Different model catches different blind spots.
+
+## Public Communication
+
+Never post publicly without Chris's approval. Draft and wait for go-ahead.
+
 ## Release Safety Rules
 
 Production systems depend on this package. These rules are non-negotiable.
