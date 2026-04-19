@@ -2,30 +2,97 @@
 # manual-compact.sh — Generate a compaction summary for a CC session
 #
 # Usage:
-#   manual-compact.sh <session-jsonl> [user-context-file]
+#   manual-compact.sh <project-dir-or-session-jsonl> [user-context-file]
+#
+# Accepts either:
+#   - A project working directory (e.g. ~/git_repos/myproject)
+#     → auto-finds the most recent session JSONL
+#   - A direct path to a session JSONL file
 #
 # Produces a summary at /tmp/<session-id>-compact-summary.txt
 # that can be pasted or referenced after /clear.
 #
 # The optional user-context-file is additional context the user wants
 # preserved in the summary (equivalent to /compact <instructions>).
+#
+# WARNING: Using the wrong session JSONL will produce a summary from
+# a DIFFERENT conversation. Loading that into your session after /clear
+# will inject completely wrong context. Always verify the output before
+# feeding it to an agent.
 
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <session-jsonl> [user-context-file]"
+  echo "Usage: $0 <project-dir-or-session-jsonl> [user-context-file]"
   echo ""
   echo "Generates a compaction summary from a CC session JSONL transcript."
   echo "After /clear, reference the output file to restore context."
+  echo ""
+  echo "Arguments:"
+  echo "  <project-dir>   Working directory of the CC session (e.g. ~/git_repos/myproject)"
+  echo "                  Auto-detects the most recent session JSONL."
+  echo "  <session-jsonl>  Direct path to a session JSONL file."
+  echo "  [user-context]   Optional file with additional context to preserve."
+  echo ""
+  echo "WARNING: Verify the output summary before loading it after /clear."
+  echo "         A wrong session JSONL = wrong context = confused agent."
   exit 1
 fi
 
-JSONL="$1"
+INPUT="$1"
 USER_CONTEXT_FILE="${2:-}"
+
+# Determine if input is a directory or a JSONL file
+if [ -d "$INPUT" ]; then
+  # Convert project directory to CC's project path format
+  REAL_PATH=$(realpath "$INPUT")
+  # CC replaces / with - and prepends -
+  PROJECT_KEY=$(echo "$REAL_PATH" | sed 's|/|-|g')
+  PROJECT_DIR="$HOME/.claude/projects/${PROJECT_KEY}"
+
+  if [ ! -d "$PROJECT_DIR" ]; then
+    echo "ERROR: No CC project found for directory: $INPUT"
+    echo "       Expected: $PROJECT_DIR"
+    echo ""
+    echo "Available projects:"
+    ls -d ~/.claude/projects/*/ 2>/dev/null | head -10
+    exit 1
+  fi
+
+  # Find the most recent JSONL (exclude subdirectories like subagents/)
+  JSONL=$(find "$PROJECT_DIR" -maxdepth 1 -name "*.jsonl" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+
+  if [ -z "$JSONL" ]; then
+    echo "ERROR: No session JSONL found in: $PROJECT_DIR"
+    exit 1
+  fi
+
+  echo "Project directory: $INPUT"
+  echo "Auto-detected session: $(basename "$JSONL")"
+  echo "  Modified: $(stat -c '%y' "$JSONL" | cut -d'.' -f1)"
+  echo "  Size: $(du -h "$JSONL" | cut -f1)"
+  echo ""
+  read -p "Is this the correct session? [Y/n] " CONFIRM
+  if [[ "${CONFIRM:-Y}" =~ ^[Nn] ]]; then
+    echo ""
+    echo "Available sessions in $PROJECT_DIR:"
+    ls -lt "$PROJECT_DIR"/*.jsonl 2>/dev/null | awk '{print "  " $6, $7, $8, $NF}'
+    echo ""
+    echo "Re-run with the specific JSONL path."
+    exit 1
+  fi
+elif [ -f "$INPUT" ]; then
+  JSONL="$INPUT"
+else
+  echo "ERROR: $INPUT is not a directory or file."
+  exit 1
+fi
+
 SESSION_ID=$(basename "$JSONL" .jsonl)
 OUTPUT="/tmp/${SESSION_ID}-compact-summary.txt"
 EXTRACT="/tmp/${SESSION_ID}-conv-extract.txt"
 
+echo ""
 echo "Extracting conversation from: $JSONL"
 
 # Extract conversation turns, keeping more detail for recent turns

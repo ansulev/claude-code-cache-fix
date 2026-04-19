@@ -21,30 +21,50 @@ The weighting ensures recent active work (the part you're most likely to need) g
 ## Usage
 
 ```bash
-# Basic — summarize a session
-manual-compact.sh <session-jsonl>
+# By project directory (recommended) — auto-finds the most recent session
+manual-compact.sh ~/git_repos/myproject
 
-# With user context — additional instructions to preserve
-manual-compact.sh <session-jsonl> <user-context-file>
+# By project directory with user context
+manual-compact.sh ~/git_repos/myproject /tmp/context.txt
+
+# By direct JSONL path (if you know the exact session)
+manual-compact.sh ~/.claude/projects/-home-user-git-repos-myproject/abc123.jsonl
+
+# By direct JSONL path with user context
+manual-compact.sh ~/.claude/projects/-home-user-git-repos-myproject/abc123.jsonl /tmp/context.txt
 ```
 
-### Finding Your Session JSONL
+When you pass a project directory, the tool:
+1. Converts it to CC's internal project path format
+2. Finds the most recently modified session JSONL
+3. Shows you the session details (modified date, size)
+4. **Asks for confirmation** before proceeding
 
-```bash
-# List recent sessions, sorted by modification time
-ls -lt ~/.claude/projects/<project-path>/*.jsonl | head -5
-```
+### WARNING: Wrong Session = Wrong Context
 
-The project path follows the pattern: `-home-<user>-git-repos-<repo-name>`.
+**If you select the wrong session JSONL, the summary will be from a completely different conversation.** Loading that summary after `/clear` will inject false context — the agent will confidently act on information from another session, another project, or another agent's work.
+
+Always:
+- Verify the session timestamp matches your active session
+- Review the summary output before feeding it to an agent
+- When in doubt, check the last few lines of the JSONL to confirm it's the right conversation
 
 ### Example: Basic Compaction
 
 ```bash
-./tools/manual-compact.sh \
-  ~/.claude/projects/-home-manager-git-repos-myproject/abc123.jsonl
+./tools/manual-compact.sh ~/git_repos/kanfei-nowcast-e3b
 ```
 
-Output: `/tmp/abc123-compact-summary.txt`
+```
+Project directory: /home/manager/git_repos/kanfei_nowcast_e3b
+Auto-detected session: db11f377-4ca8-4fc3-9b6d-1069da58c1b2.jsonl
+  Modified: 2026-04-19 13:26:42
+  Size: 4.8M
+
+Is this the correct session? [Y/n]
+```
+
+Output: `/tmp/db11f377-...-compact-summary.txt`
 
 ### Example: With User Context
 
@@ -54,9 +74,7 @@ If there's specific context you know the summary might miss:
 echo "The MR2 OOM debugging took 3 days. The PR #75 architectural recommendation
 was max(dualpol_lr, hail_lr) for correlation grouping." > /tmp/context.txt
 
-./tools/manual-compact.sh \
-  ~/.claude/projects/-home-manager-git-repos-myproject/abc123.jsonl \
-  /tmp/context.txt
+./tools/manual-compact.sh ~/git_repos/kanfei-nowcast-e3b /tmp/context.txt
 ```
 
 The user context is injected into the summarization prompt, ensuring those details appear in the output.
