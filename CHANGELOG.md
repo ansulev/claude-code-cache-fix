@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.4 (2026-04-19)
+
+- **New tool: `manual-compact.sh`** — Manual compaction for sessions using the 1M context hack (`DISABLE_COMPACT=1`). Extracts conversation from JSONL, weights recent turns heavily for active-work fidelity, summarizes via Claude Sonnet. Supports project directory auto-detection with confirmation prompt, and optional user context file for known gaps. Tested at 95% active-work fidelity. See `tools/MANUAL-COMPACT.md`.
+- **Development workflow** — Added formal PR review process, agent identification requirement, label policy, and cross-LLM review workflow to CLAUDE.md.
+- **TRACKED_ISSUES.md** — Updated with v2.1.112/113 context, new issues (#35, #36, #39, #40, #41, #50083), media coverage section, and new contributors (deafsquad, wadabum, cowwoc, stellaraccident).
+
+16 total cache-stability fixes. 162 tests.
+
 ## 2.0.3 (2026-04-17)
 
 - **BUGFIX: `cache_control_sticky` still exceeded 4-marker limit on CC v2.1.112** — v2.0.2 reduced `MAX_POSITIONS` from 3→2 assuming CC uses exactly 2 markers (1 system + 1 messages). CC v2.1.112 uses 3 markers in some configurations, so 2 sticky + 3 CC = 5, still exceeding the hard limit. Fix: count all existing `cache_control` markers across the full body (system + messages) before adding sticky markers, and cap the total at 4. No more assumptions about CC's marker budget. Caused `400 invalid_request_error` in production.
