@@ -114,7 +114,20 @@ Use the user context file to fill known gaps.
 
 ### Token cost
 
-The summarization call costs tokens against your Q5h quota. At ~50K extract tokens through Sonnet, expect ~1-2% Q5h per compaction. This is comparable to what `/compact` costs.
+Two costs to account for:
+
+1. **Summarization call** — the `claude --print` call through Sonnet. At ~50K extract tokens, expect ~1-2% Q5h.
+2. **Cold start after /clear** — the first API call rebuilds the full cache from scratch. Real-world example from a 954K-token session:
+
+```
+Before /clear:  cache_read=954,399  cache_creation=0      (warm)
+First call:     cache_read=0        cache_creation=954,399 (cold rebuild)
+Second call:    cache_read=957,253  cache_creation=5,569   (warm again)
+```
+
+The cold rebuild consumed ~15% Q5h in one call on our Max 5x account. After that single rebuild, the session is warm again and cache hits resume at 99%+.
+
+**Total cost of a manual compact cycle:** ~17% Q5h (2% summarization + 15% cold rebuild). Compare to hitting the 1M wall and losing the session entirely.
 
 ### Requires Claude Sonnet access
 
