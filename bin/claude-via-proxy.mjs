@@ -82,12 +82,12 @@ const claudeEnv = {
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${actualPort}`,
 };
 
-const claudeCmd = process.env.CACHE_FIX_CLAUDE_CMD || "claude";
 const spawnOpts = { stdio: ["inherit", "pipe", "pipe"], env: claudeEnv };
 if (process.env.CACHE_FIX_CLAUDE_CMD) {
-  claudeProc = spawn(claudeCmd, claudeArgs, { ...spawnOpts, shell: true });
+  const parts = process.env.CACHE_FIX_CLAUDE_CMD.split(" ");
+  claudeProc = spawn(parts[0], [...parts.slice(1), ...claudeArgs], spawnOpts);
 } else {
-  claudeProc = spawn(claudeCmd, claudeArgs, spawnOpts);
+  claudeProc = spawn("claude", claudeArgs, spawnOpts);
 }
 
 claudeProc.stdout.on("data", (chunk) => process.stdout.write(chunk));

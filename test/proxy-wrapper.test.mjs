@@ -60,15 +60,19 @@ describe("proxy server lifecycle", () => {
   });
 });
 
+function cleanEnv(overrides) {
+  const env = { ...process.env, ...overrides };
+  delete env.CACHE_FIX_PROXY_PORT;
+  delete env.CACHE_FIX_PROXY_UPSTREAM;
+  env.CACHE_FIX_PROXY_BIND = "127.0.0.1";
+  return env;
+}
+
 describe("launch wrapper (claude-via-proxy)", () => {
   it("exits with error when claude command is not found", async () => {
     const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
-      env: {
-        ...process.env,
-        CACHE_FIX_PROXY_BIND: "127.0.0.1",
-        CACHE_FIX_CLAUDE_CMD: "/nonexistent/path/to/claude",
-      },
+      env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: "/nonexistent/path/to/claude" }),
     });
 
     let stderr = "";
@@ -89,11 +93,7 @@ describe("launch wrapper (claude-via-proxy)", () => {
     try {
       const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: {
-          ...process.env,
-          CACHE_FIX_PROXY_BIND: "127.0.0.1",
-          CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}`,
-        },
+        env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}` }),
       });
 
       let stdout = "";
@@ -118,19 +118,20 @@ describe("launch wrapper (claude-via-proxy)", () => {
     try {
       const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
         stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: {
-          ...process.env,
-          CACHE_FIX_PROXY_BIND: "127.0.0.1",
-          CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}`,
-        },
+        env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}` }),
       });
+
+      let stderr = "";
+      wrapperProc.stderr.on("data", (c) => { stderr += c.toString(); });
+      let stdout = "";
+      wrapperProc.stdout.on("data", (c) => { stdout += c.toString(); });
 
       const code = await new Promise((resolve) => {
         wrapperProc.on("exit", (c) => resolve(c));
         setTimeout(() => { wrapperProc.kill("SIGTERM"); resolve(null); }, 15000);
       });
 
-      assert.equal(code, 42);
+      assert.equal(code, 42, `Expected exit 42, got ${code}. stderr: ${stderr} stdout: ${stdout}`);
     } finally {
       try { unlinkSync(script); } catch {}
     }
