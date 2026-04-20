@@ -34,18 +34,18 @@ const proxyProc = fork(SERVER_PATH, [], {
 let claudeProc = null;
 let exiting = false;
 
-function cleanup(code) {
+function cleanup() {
   if (exiting) return;
   exiting = true;
   if (claudeProc && !claudeProc.killed) claudeProc.kill("SIGTERM");
   if (proxyProc && !proxyProc.killed) proxyProc.kill("SIGTERM");
-  setTimeout(() => process.exit(code), 3000);
 }
 
 proxyProc.on("exit", (code) => {
   if (!exiting) {
     process.stderr.write(`proxy exited unexpectedly (code ${code})\n`);
-    cleanup(1);
+    cleanup();
+    process.exit(1);
   }
 });
 
@@ -73,7 +73,7 @@ try {
   actualPort = await waitForReady();
 } catch (err) {
   process.stderr.write(`${err.message}\n`);
-  cleanup(1);
+  cleanup();
   process.exit(1);
 }
 
@@ -83,9 +83,12 @@ const claudeEnv = {
 };
 
 claudeProc = spawn("claude", claudeArgs, {
-  stdio: "inherit",
+  stdio: ["inherit", "pipe", "pipe"],
   env: claudeEnv,
 });
+
+claudeProc.stdout.pipe(process.stdout);
+claudeProc.stderr.pipe(process.stderr);
 
 claudeProc.on("error", (err) => {
   if (err.code === "ENOENT") {
@@ -93,13 +96,15 @@ claudeProc.on("error", (err) => {
   } else {
     process.stderr.write(`Failed to start claude: ${err.message}\n`);
   }
-  cleanup(1);
+  cleanup();
+  process.exit(1);
 });
 
 claudeProc.on("exit", (code) => {
-  cleanup(code ?? 0);
-  process.exit(code ?? 0);
+  const exitCode = code ?? 0;
+  cleanup();
+  process.exit(exitCode);
 });
 
-process.on("SIGINT", () => cleanup(130));
-process.on("SIGTERM", () => cleanup(143));
+process.on("SIGINT", () => { cleanup(); process.exit(130); });
+process.on("SIGTERM", () => { cleanup(); process.exit(143); });
