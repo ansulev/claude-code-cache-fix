@@ -87,8 +87,8 @@ claudeProc = spawn("claude", claudeArgs, {
   env: claudeEnv,
 });
 
-claudeProc.stdout.pipe(process.stdout);
-claudeProc.stderr.pipe(process.stderr);
+claudeProc.stdout.on("data", (chunk) => process.stdout.write(chunk));
+claudeProc.stderr.on("data", (chunk) => process.stderr.write(chunk));
 
 claudeProc.on("error", (err) => {
   if (err.code === "ENOENT") {
@@ -100,7 +100,7 @@ claudeProc.on("error", (err) => {
   process.exit(1);
 });
 
-claudeProc.on("exit", (code) => {
+claudeProc.on("close", (code) => {
   const exitCode = code ?? 0;
   cleanup();
   process.exit(exitCode);
