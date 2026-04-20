@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   stripCacheControlMarkers,
   countUserCacheControlMarkers,
-  CACHE_CONTROL_CANONICAL_MARKER,
+  CACHE_CONTROL_CANONICAL_MARKER_LEGACY,
+  getCanonicalMarker,
 } from "../preload.mjs";
 
 // -- stripCacheControlMarkers -----------------------------------------------
@@ -149,9 +150,15 @@ test("countUserCacheControlMarkers: string-content user message doesn't crash", 
   assert.equal(countUserCacheControlMarkers(body), 1);
 });
 
-// -- CACHE_CONTROL_CANONICAL_MARKER ----------------------------------------
+// -- getCanonicalMarker ----------------------------------------
 
-test("CACHE_CONTROL_CANONICAL_MARKER is the expected shape", () => {
-  assert.equal(CACHE_CONTROL_CANONICAL_MARKER.type, "ephemeral");
-  assert.equal(CACHE_CONTROL_CANONICAL_MARKER.ttl, "1h");
+test("getCanonicalMarker returns expected default shape", () => {
+  const marker = getCanonicalMarker();
+  assert.equal(marker.type, "ephemeral");
+  assert.ok(marker.ttl === "1h" || marker.ttl === "5m");
+});
+
+test("CACHE_CONTROL_CANONICAL_MARKER_LEGACY is 1h for backward compat", () => {
+  assert.equal(CACHE_CONTROL_CANONICAL_MARKER_LEGACY.type, "ephemeral");
+  assert.equal(CACHE_CONTROL_CANONICAL_MARKER_LEGACY.ttl, "1h");
 });

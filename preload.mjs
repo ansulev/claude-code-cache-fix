@@ -590,7 +590,17 @@ function isBookkeepingReminder(text) {
 // correctly.
 // --------------------------------------------------------------------------
 
-const CACHE_CONTROL_CANONICAL_MARKER = { type: "ephemeral", ttl: "1h" };
+// Detected per-request from existing markers. Default 1h; downgraded to 5m
+// if any existing block already carries ttl="5m" (Q5h=100% tier).
+// The API rejects 1h markers after 5m markers, so all injected markers
+// must match the lowest existing tier.
+let _detectedTtlTier = "1h";
+
+function getCanonicalMarker() {
+  return { type: "ephemeral", ttl: _detectedTtlTier };
+}
+
+const CACHE_CONTROL_CANONICAL_MARKER_LEGACY = { type: "ephemeral", ttl: "1h" };
 
 /**
  * Strip every cache_control marker from a single user message's content
@@ -777,7 +787,9 @@ const CACHE_CONTROL_STICKY_DIR = join(homedir(), ".claude", "cache-fix-state");
 // CC uses 1 on system[2] + cache_control_normalize places 1 on last user msg = 2 reserved.
 // Sticky can use at most 2 historical positions to stay within the 4-marker cap.
 const CACHE_CONTROL_STICKY_MAX_POSITIONS = 2;
-const CACHE_CONTROL_STICKY_DEFAULT_MARKER = { type: "ephemeral", ttl: "1h" };
+function getCacheControlStickyDefaultMarker() {
+  return { type: "ephemeral", ttl: _detectedTtlTier };
+}
 
 /**
  * Build the absolute state-file path for a given project key. Exported so
@@ -850,7 +862,7 @@ function readCacheControlStickyState(key) {
         marker:
           p.marker && typeof p.marker === "object" && typeof p.marker.type === "string"
             ? { ...p.marker }
-            : { ...CACHE_CONTROL_STICKY_DEFAULT_MARKER },
+            : { ...getCacheControlStickyDefaultMarker() },
       });
     }
     return { version: 1, positions };
@@ -1800,6 +1812,24 @@ globalThis.fetch = async function (url, options) {
         debugLog("CACHE_FIX_DISABLED=1 — all bug fixes bypassed, monitoring active");
       }
 
+      // Detect existing TTL tier from the payload. If any block already has
+      // ttl="5m" (Q5h=100% tier), all injected markers must use 5m too —
+      // the API rejects 1h after 5m in processing order (tools → system → messages).
+      _detectedTtlTier = "1h";
+      const allBlocks = [
+        ...(Array.isArray(payload.system) ? payload.system : []),
+        ...(Array.isArray(payload.messages) ? payload.messages.flatMap(m => Array.isArray(m.content) ? m.content : []) : []),
+      ];
+      for (const block of allBlocks) {
+        if (block?.cache_control?.ttl === "5m") {
+          _detectedTtlTier = "5m";
+          break;
+        }
+      }
+      if (_detectedTtlTier === "5m") {
+        debugLog("TTL TIER DETECT: existing 5m markers found — all injected markers will use 5m");
+      }
+
       debugLog("--- API call to", urlStr);
       debugLog("message count:", payload.messages?.length);
 
@@ -2350,15 +2380,15 @@ globalThis.fetch = async function (url, options) {
           const existingCC = targetBlock?.cache_control;
           const canonicalAlreadyCorrect =
             existingCC &&
-            existingCC.type === CACHE_CONTROL_CANONICAL_MARKER.type &&
-            existingCC.ttl === CACHE_CONTROL_CANONICAL_MARKER.ttl;
+            existingCC.type === getCanonicalMarker().type &&
+            existingCC.ttl === getCanonicalMarker().ttl;
 
           if (!(canonicalAlreadyCorrect && countUserCacheControlMarkers(payload) === 1)) {
             // Strip all markers from user messages, then place canonical.
             for (const msg of payload.messages) stripCacheControlMarkers(msg);
             const tm = payload.messages[targetMsgIdx];
             const newContent = tm.content.slice();
-            newContent[targetBlockIdx] = { ...newContent[targetBlockIdx], cache_control: { ...CACHE_CONTROL_CANONICAL_MARKER } };
+            newContent[targetBlockIdx] = { ...newContent[targetBlockIdx], cache_control: { ...getCanonicalMarker() } };
             payload.messages[targetMsgIdx] = { ...tm, content: newContent };
             ccMutated = true;
           }
@@ -2423,7 +2453,8 @@ globalThis.fetch = async function (url, options) {
           debugLog(`SKIPPED: TTL injection (${requestType} set to 'none' — pass-through)`);
           recordFixResult("ttl", "skipped");
         } else {
-          const ttlParam = ttlValue === "5m" ? "5m" : "1h";
+          // Respect detected tier: if existing blocks have 5m, never inject 1h
+          const ttlParam = ttlValue === "5m" || _detectedTtlTier === "5m" ? "5m" : "1h";
           let ttlInjected = 0;
           payload.system = payload.system.map((block) => {
             if (block.cache_control?.type === "ephemeral" && !block.cache_control.ttl) {
@@ -2835,7 +2866,8 @@ export {
   isBookkeepingReminder,
   stripCacheControlMarkers,
   countUserCacheControlMarkers,
-  CACHE_CONTROL_CANONICAL_MARKER,
+  CACHE_CONTROL_CANONICAL_MARKER_LEGACY,
+  getCanonicalMarker,
   normalizeToolUseInputsInBody,
   computeStickyMessageHash,
   cacheControlStickyStatePath,
@@ -2844,6 +2876,6 @@ export {
   readCacheControlStickyState,
   writeCacheControlStickyState,
   CACHE_CONTROL_STICKY_MAX_POSITIONS,
-  CACHE_CONTROL_STICKY_DEFAULT_MARKER,
+  getCacheControlStickyDefaultMarker,
   _pinnedBlocks,  // exported so tests can reset between runs
 };

@@ -10,7 +10,7 @@ import {
   readCacheControlStickyState,
   writeCacheControlStickyState,
   CACHE_CONTROL_STICKY_MAX_POSITIONS,
-  CACHE_CONTROL_STICKY_DEFAULT_MARKER,
+  getCacheControlStickyDefaultMarker,
 } from "../preload.mjs";
 
 // Helper: build a user message with a tool_use_id-keyed shape.
@@ -243,8 +243,10 @@ test("cache_control_sticky: hash is null for messages with no identifiable conte
   assert.equal(computeStickyMessageHash({ role: "user", content: [{ type: "image" }] }), null);
 });
 
-test("cache_control_sticky: default marker constant is ephemeral/1h", () => {
-  assert.deepEqual(CACHE_CONTROL_STICKY_DEFAULT_MARKER, { type: "ephemeral", ttl: "1h" });
+test("cache_control_sticky: default marker function returns ephemeral with valid ttl", () => {
+  const marker = getCacheControlStickyDefaultMarker();
+  assert.equal(marker.type, "ephemeral");
+  assert.ok(marker.ttl === "1h" || marker.ttl === "5m");
 });
 
 test("cache_control_sticky: respects 4-marker hard limit when body already has markers", () => {
