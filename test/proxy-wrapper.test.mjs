@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { writeFileSync, unlinkSync } from "node:fs";
 import http from "node:http";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -68,7 +67,9 @@ function cleanEnv(overrides) {
   return env;
 }
 
-describe("launch wrapper (claude-via-proxy)", () => {
+const NODE = process.execPath;
+
+describe("launch wrapper (claude-via-proxy)", { concurrency: 1 }, () => {
   it("exits with error when claude command is not found", async () => {
     const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -87,53 +88,38 @@ describe("launch wrapper (claude-via-proxy)", () => {
   });
 
   it("sets ANTHROPIC_BASE_URL and forwards to child process", async () => {
-    const script = resolve(__dirname, ".fake-claude-env.mjs");
-    writeFileSync(script, 'process.stdout.write("BASE_URL=" + process.env.ANTHROPIC_BASE_URL + "\\n");\nprocess.exit(0);\n');
+    const script = 'process.stdout.write("BASE_URL="+process.env.ANTHROPIC_BASE_URL+"\\n")';
+    const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${NODE} -e ${script}` }),
+    });
 
-    try {
-      const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
-        stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}` }),
-      });
+    let stdout = "";
+    wrapperProc.stdout.on("data", (c) => { stdout += c.toString(); });
 
-      let stdout = "";
-      wrapperProc.stdout.on("data", (c) => { stdout += c.toString(); });
+    const code = await new Promise((resolve) => {
+      wrapperProc.on("exit", (c) => resolve(c));
+      setTimeout(() => { wrapperProc.kill("SIGTERM"); resolve(null); }, 15000);
+    });
 
-      const code = await new Promise((resolve) => {
-        wrapperProc.on("exit", (c) => resolve(c));
-        setTimeout(() => { wrapperProc.kill("SIGTERM"); resolve(null); }, 15000);
-      });
-
-      assert.ok(stdout.includes("BASE_URL=http://127.0.0.1:"), `Expected BASE_URL in output, got: ${stdout}`);
-      assert.equal(code, 0);
-    } finally {
-      try { unlinkSync(script); } catch {}
-    }
+    assert.ok(stdout.includes("BASE_URL=http://127.0.0.1:"), `Expected BASE_URL in output, got: ${stdout}`);
+    assert.equal(code, 0);
   });
 
   it("propagates claude exit code", async () => {
-    const script = resolve(__dirname, ".fake-claude-exit.mjs");
-    writeFileSync(script, "process.exit(42);\n");
+    const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${NODE} -e process.exit(42)` }),
+    });
 
-    try {
-      const wrapperProc = fork(WRAPPER_PATH, ["--proxy-port", "0"], {
-        stdio: ["ignore", "pipe", "pipe", "ipc"],
-        env: cleanEnv({ CACHE_FIX_CLAUDE_CMD: `${process.execPath} ${script}` }),
-      });
+    let stderr = "";
+    wrapperProc.stderr.on("data", (c) => { stderr += c.toString(); });
 
-      let stderr = "";
-      wrapperProc.stderr.on("data", (c) => { stderr += c.toString(); });
-      let stdout = "";
-      wrapperProc.stdout.on("data", (c) => { stdout += c.toString(); });
+    const code = await new Promise((resolve) => {
+      wrapperProc.on("exit", (c) => resolve(c));
+      setTimeout(() => { wrapperProc.kill("SIGTERM"); resolve(null); }, 15000);
+    });
 
-      const code = await new Promise((resolve) => {
-        wrapperProc.on("exit", (c) => resolve(c));
-        setTimeout(() => { wrapperProc.kill("SIGTERM"); resolve(null); }, 15000);
-      });
-
-      assert.equal(code, 42, `Expected exit 42, got ${code}. stderr: ${stderr} stdout: ${stdout}`);
-    } finally {
-      try { unlinkSync(script); } catch {}
-    }
+    assert.equal(code, 42, `Expected exit 42, got ${code}. stderr: ${stderr}`);
   });
 });
