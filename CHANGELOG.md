@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.6 (2026-04-20)
+
+- **BUGFIX: `manual-compact.sh` path conversion failed on directories with underscores** — CC normalizes underscores to hyphens in project paths (e.g. `kanfei_test` → `kanfei-test`). The script now handles this. Also improved output to show the exact copy-paste message with the real session ID.
+
+16 total cache-stability fixes. 163 tests.
+
 ## 2.0.5 (2026-04-20)
 
 - **BUGFIX: TTL ordering violation causes 400 error at Q5h=100%** — When the user's quota hit 100%, CC places `ttl: "5m"` markers. Our interceptor then added `ttl: "1h"` markers on other blocks, violating Anthropic's ordering constraint (1h cannot follow 5m in tools→system→messages order). Fix: detect existing TTL tier from the payload before any extension runs. If any block has `ttl: "5m"`, all injected markers (TTL injection, `cache_control_normalize`, `cache_control_sticky`) now use `5m` to match. Reported by @cowwoc (#44).
