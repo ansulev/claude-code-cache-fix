@@ -3,7 +3,7 @@
 **Author:** Manager Agent
 **Date:** 2026-04-20
 **Status:** Draft — pending Codex review
-**Branch:** `feature/proxy-v3/extensions` (off `feature/proxy-v3`)
+**Branch:** `feature/proxy-v3-extensions` (off `feature/proxy-v3`)
 **Ref:** #40
 
 ---
@@ -35,22 +35,33 @@ export default {
     // ctx.body — parsed JSON request body (mutable)
     // ctx.headers — outbound headers (mutable)
     // ctx.meta — shared metadata bag for cross-extension communication
-    // Return: undefined (mutate in place) or { skip: true } to abort forwarding
+    // Return: undefined (mutate in place) or { skip: true, status: 4xx, body: {...} } to abort forwarding
+    // When skip is returned, the proxy responds directly to the client with the given status/body
+    // without forwarding to upstream. If status/body are omitted, defaults to 400 + generic error.
   },
 
-  // Called after full response is received (non-streaming path)
+  // Called when upstream response headers arrive (before body/stream)
+  async onResponseStart(ctx) {
+    // ctx.status — HTTP status code
+    // ctx.headers — response headers (mutable before forwarding to client)
+    // ctx.meta — same bag from onRequest
+    // Fires once per request, before any SSE events or body data
+  },
+
+  // Called after full response is received (non-streaming path only)
   async onResponse(ctx) {
     // ctx.status — HTTP status code
-    // ctx.headers — response headers (mutable before send)
+    // ctx.headers — response headers
     // ctx.body — parsed JSON response body (mutable)
     // ctx.meta — same bag from onRequest
   },
 
   // Called on each SSE event during streaming (optional)
   async onStreamEvent(ctx) {
-    // ctx.event — parsed SSE event object
+    // ctx.event — parsed SSE event object (mutable — see §1.5 for reserialization)
     // ctx.meta — same bag
     // ctx.telemetry — accumulating telemetry record
+    // ctx.responseHeaders — headers from onResponseStart (read-only at this point)
   },
 }
 ```
@@ -63,16 +74,41 @@ Request path:
 3. Forward modified request to upstream
 
 Response/stream path:
-1. For streaming: each SSE `data:` line is parsed and passed through `onStreamEvent` hooks
-2. For non-streaming: full response is parsed and passed through `onResponse` hooks
-3. Modified response/stream is forwarded back to client
+1. Run `onResponseStart` hooks when upstream response headers arrive (before body)
+2. For streaming: each SSE `data:` line is parsed and passed through `onStreamEvent` hooks
+3. For non-streaming: full response body is buffered, parsed, and passed through `onResponse` hooks
+4. Modified response/stream is forwarded back to client (see §1.5 for stream reserialization)
+
+### 1.5 SSE Stream Reserialization Contract
+
+The proxy owns full SSE reserialization on the streaming path. When extensions mutate events via `onStreamEvent`, the pipeline handles serialization back to wire format:
+
+**What the pipeline parses:**
+- Only `data:` lines containing JSON payloads are parsed and passed to `onStreamEvent`
+- Non-data lines (`event:`, `id:`, `retry:`, SSE comments starting with `:`) are forwarded verbatim without passing through extension hooks
+- Multi-line `data:` payloads (rare in Anthropic's API) are concatenated before parsing, then reserialized as a single `data:` line
+
+**Reserialization after mutation:**
+- After all `onStreamEvent` hooks run, the (possibly mutated) event object is serialized: `data: ${JSON.stringify(ctx.event)}\n\n`
+- If no extension modifies the event (reference equality check on `ctx.event`), the original raw bytes are forwarded instead — zero-cost passthrough for unmodified events
+- If an extension sets `ctx.drop = true`, the event is swallowed (not forwarded to client)
+
+**Ordering guarantee:**
+- Events are processed and forwarded in the order they arrive from upstream
+- The pipeline does NOT buffer or reorder events
+- If an `onStreamEvent` hook is async and takes time, subsequent events queue behind it (backpressure propagates upstream naturally)
+
+**Error handling:**
+- If `JSON.parse` fails on a `data:` line, the raw line is forwarded verbatim (treat as opaque)
+- If reserialization fails after mutation (e.g., extension set `ctx.event` to a non-serializable value), log the error and forward the original raw bytes
 
 ### 1.3 Hot Reload
 
 Extensions live in `proxy/extensions/` directory. The pipeline:
 - Loads all `.mjs` files from that directory on startup
-- Watches the directory for changes (add/remove/modify)
+- Watches the directory AND `extensions.json` for changes (add/remove/modify)
 - On change: re-imports the modified module, updates the pipeline registry
+- On `extensions.json` change: re-reads config, applies enabled/order changes immediately
 - Active requests in-flight are NOT affected (they keep the extension set they started with)
 - New requests use the updated pipeline
 
