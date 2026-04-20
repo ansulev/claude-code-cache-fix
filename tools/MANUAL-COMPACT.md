@@ -79,6 +79,32 @@ was max(dualpol_lr, hail_lr) for correlation grouping." > /tmp/context.txt
 
 The user context is injected into the summarization prompt, ensuring those details appear in the output.
 
+### Pre-Clear Agent Review (Recommended)
+
+Before `/clear`, let the agent review the summary while it still has full context. Paste this prompt into the session:
+
+```
+I'm about to /clear this session. Read /tmp/<session-id>-compact-summary.txt — that's the summary that will be used to restore context after the clear.
+
+Review it against your current knowledge and do the following:
+
+1. Write a SESSION_STATE.md in this project directory that captures anything the summary missed — especially:
+   - Active work state details the summary got wrong or understated
+   - Decisions made and their rationale that aren't in the summary
+   - Context about collaborators, dependencies, or constraints
+   - Anything you'd need to know to resume work that isn't recoverable from git
+
+2. Write any critical findings to memory files (if your project uses them) that should persist across sessions.
+
+3. Tell me what's missing from the summary so I can verify the gap is covered.
+
+Do NOT do a /clear yourself. I will do it after you've finished writing.
+```
+
+Replace `<session-id>` with the actual path shown in the script output.
+
+The agent will identify gaps while it still has the context to fill them. This typically raises summary fidelity from ~85% to ~95%+.
+
 ### Restoring Context After /clear
 
 In the CC session:
@@ -90,7 +116,7 @@ In the CC session:
 Then as your first message:
 
 ```
-Read /tmp/<session-id>-compact-summary.txt for context on where we left off.
+Read /tmp/<session-id>-compact-summary.txt for context on where we left off. Also read SESSION_STATE.md in this directory for additional context the summary may have missed.
 ```
 
 ## Limitations
