@@ -46,8 +46,8 @@ USER_CONTEXT_FILE="${2:-}"
 if [ -d "$INPUT" ]; then
   # Convert project directory to CC's project path format
   REAL_PATH=$(realpath "$INPUT")
-  # CC replaces / with - and prepends -
-  PROJECT_KEY=$(echo "$REAL_PATH" | sed 's|/|-|g')
+  # CC replaces / with - and underscores with - , then prepends -
+  PROJECT_KEY=$(echo "$REAL_PATH" | sed 's|/|-|g' | sed 's|_|-|g')
   PROJECT_DIR="$HOME/.claude/projects/${PROJECT_KEY}"
 
   if [ ! -d "$PROJECT_DIR" ]; then
@@ -208,5 +208,7 @@ SIZE=$(wc -c < "$OUTPUT")
 echo ""
 echo "Summary generated: $OUTPUT ($SIZE bytes)"
 echo ""
-echo "To restore context after /clear:"
+echo "To restore context after /clear, use this as your first message:"
+echo ""
 echo "  Read $OUTPUT for context on where we left off."
+echo ""
