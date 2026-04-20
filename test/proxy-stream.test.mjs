@@ -82,6 +82,19 @@ describe("stream.mjs", () => {
     assert.equal(telemetry.inputTokens, 42);
   });
 
+  it("preserves requestedModel when set before streaming", async () => {
+    const telemetry = createTelemetryRecord();
+    telemetry.requestedModel = "claude-sonnet-4-20250514";
+    const events = [
+      { type: "message_start", message: { model: "claude-sonnet-4-20250514", usage: { input_tokens: 10 } } },
+    ];
+    const upstream = mockUpstream(sseChunks(events));
+    const client = mockClientRes();
+    await streamResponse(upstream, client.res, telemetry);
+    assert.equal(telemetry.requestedModel, "claude-sonnet-4-20250514");
+    assert.equal(telemetry.model, "claude-sonnet-4-20250514");
+  });
+
   it("handles backpressure via drain", async () => {
     const telemetry = createTelemetryRecord();
     let drainCalled = false;

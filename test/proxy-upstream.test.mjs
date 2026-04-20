@@ -1,25 +1,64 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { forwardRequest } from "../proxy/upstream.mjs";
+
+let fakeUpstream;
+let fakePort;
+let forwardRequest;
 
 describe("upstream.mjs", () => {
-  it("strips hop-by-hop request headers", async () => {
-    let receivedHeaders;
-    const fakeUpstream = http.createServer((req, res) => {
-      receivedHeaders = req.headers;
-      res.writeHead(200);
-      res.end();
+  before(async () => {
+    fakeUpstream = http.createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => { body += c; });
+      req.on("end", () => {
+        const delay = req.headers["x-test-delay"] ? parseInt(req.headers["x-test-delay"], 10) : 0;
+        const respond = () => {
+          res.writeHead(200, {
+            "content-type": "text/event-stream",
+            "x-test-received-headers": JSON.stringify(req.headers),
+            "connection": "keep-alive",
+            "transfer-encoding": "chunked",
+          });
+          res.end("data: {\"type\":\"ping\"}\n\n");
+        };
+        if (delay > 0) setTimeout(respond, delay);
+        else respond();
+      });
     });
     await new Promise((resolve) => fakeUpstream.listen(0, "127.0.0.1", resolve));
-    const port = fakeUpstream.address().port;
+    fakePort = fakeUpstream.address().port;
 
-    process.env.CACHE_FIX_PROXY_UPSTREAM = `http://127.0.0.1:${port}`;
-    // Need to reset cached config — re-import won't work due to module cache.
-    // Instead, test the header building logic directly.
+    process.env.CACHE_FIX_PROXY_UPSTREAM = `http://127.0.0.1:${fakePort}`;
+    const mod = await import("../proxy/upstream.mjs");
+    forwardRequest = mod.forwardRequest;
+  });
+
+  after(() => {
     fakeUpstream.close();
+  });
 
-    // Direct unit test: verify the concept by checking the exported function handles headers
+  it("forwards request to http:// upstream and returns response", async () => {
+    const mockReq = {
+      url: "/v1/messages",
+      method: "POST",
+      headers: {
+        authorization: "Bearer sk-test",
+        "content-type": "application/json",
+        "x-stainless-timeout": "600",
+      },
+    };
+
+    const { upstreamRes, responseHeaders, statusCode } = await forwardRequest(mockReq, "{}", null);
+    assert.equal(statusCode, 200);
+    assert.equal(responseHeaders["content-type"], "text/event-stream");
+
+    const chunks = [];
+    for await (const chunk of upstreamRes) chunks.push(chunk);
+    assert.ok(Buffer.concat(chunks).toString().includes("ping"));
+  });
+
+  it("strips hop-by-hop request headers", async () => {
     const mockReq = {
       url: "/v1/messages",
       method: "POST",
@@ -33,14 +72,31 @@ describe("upstream.mjs", () => {
       },
     };
 
-    // forwardRequest will fail to connect, but we can verify it doesn't throw on header processing
-    // by catching the connection error
-    try {
-      await forwardRequest(mockReq, "{}", null);
-    } catch (err) {
-      // Expected — no real upstream. The point is it didn't crash on header processing.
-      assert.ok(err.message.includes("ECONNREFUSED") || err.message.includes("connect"));
-    }
+    const { upstreamRes, responseHeaders } = await forwardRequest(mockReq, "{}", null);
+    const received = JSON.parse(responseHeaders["x-test-received-headers"]);
+
+    assert.ok(!received["proxy-authorization"], "proxy-* headers should be stripped");
+    assert.equal(received["authorization"], "Bearer sk-test");
+    assert.equal(received["content-type"], "application/json");
+    assert.equal(received["accept-encoding"], "identity");
+    assert.equal(received["x-stainless-timeout"], "600");
+
+    for await (const _ of upstreamRes) {}
+  });
+
+  it("strips hop-by-hop response headers", async () => {
+    const mockReq = {
+      url: "/v1/messages",
+      method: "POST",
+      headers: { "content-type": "application/json" },
+    };
+
+    const { upstreamRes, responseHeaders } = await forwardRequest(mockReq, "{}", null);
+
+    assert.ok(!responseHeaders["connection"], "connection should be stripped from response");
+    assert.ok(!responseHeaders["transfer-encoding"], "transfer-encoding should be stripped from response");
+
+    for await (const _ of upstreamRes) {}
   });
 
   it("respects abort signal", async () => {
@@ -48,20 +104,17 @@ describe("upstream.mjs", () => {
     const mockReq = {
       url: "/v1/messages",
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-test-delay": "5000" },
     };
 
-    // Abort shortly after request starts (before connection completes to real upstream)
-    setTimeout(() => controller.abort(), 10);
+    setTimeout(() => controller.abort(), 50);
 
     try {
       await forwardRequest(mockReq, "{}", controller.signal);
       assert.fail("Should have thrown");
     } catch (err) {
-      // Either aborted or connection refused — both are acceptable
       assert.ok(
         err.message.includes("abort") ||
-        err.message.includes("ECONNREFUSED") ||
         err.message.includes("destroyed") ||
         err.message.includes("socket hang up")
       );
