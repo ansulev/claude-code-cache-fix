@@ -1,4 +1,5 @@
 import https from "node:https";
+import http from "node:http";
 import { URL } from "node:url";
 import config from "./config.mjs";
 
@@ -54,16 +55,20 @@ export function forwardRequest(clientReq, body, signal) {
       headers["content-length"] = Buffer.byteLength(body).toString();
     }
 
+    const isHTTPS = upstreamUrl.protocol === "https:";
+    const transport = isHTTPS ? https : http;
+    const defaultPort = isHTTPS ? 443 : 80;
+
     const options = {
       hostname: upstreamUrl.hostname,
-      port: upstreamUrl.port || 443,
+      port: upstreamUrl.port || defaultPort,
       path: upstreamUrl.pathname + upstreamUrl.search,
       method: clientReq.method,
       headers,
       timeout: config.timeout,
     };
 
-    const upstreamReq = https.request(options, (upstreamRes) => {
+    const upstreamReq = transport.request(options, (upstreamRes) => {
       const responseHeaders = filterResponseHeaders(upstreamRes.headers);
       resolve({ upstreamRes, responseHeaders, statusCode: upstreamRes.statusCode });
     });

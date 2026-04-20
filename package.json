@@ -5,11 +5,16 @@
   "type": "module",
   "exports": "./preload.mjs",
   "main": "./preload.mjs",
+  "bin": {
+    "claude-via-proxy": "./bin/claude-via-proxy.mjs"
+  },
   "files": [
     "preload.mjs",
     "postinstall.js",
     "tools/",
-    "claude-fixed.bat"
+    "claude-fixed.bat",
+    "proxy/",
+    "bin/"
   ],
   "engines": {
     "node": ">=18"

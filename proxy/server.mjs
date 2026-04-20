@@ -22,6 +22,13 @@ async function handleMessages(clientReq, clientRes) {
   });
 
   const body = await collectBody(clientReq);
+
+  let requestedModel = null;
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed.model) requestedModel = parsed.model;
+  } catch {}
+
   let upstreamRes, responseHeaders, statusCode;
 
   try {
@@ -45,6 +52,7 @@ async function handleMessages(clientReq, clientRes) {
   }
 
   const telemetry = createTelemetryRecord();
+  telemetry.requestedModel = requestedModel;
 
   upstreamRes.on("error", (err) => {
     if (!clientRes.writableEnded) {

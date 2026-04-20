@@ -53,38 +53,24 @@ proxyProc.stderr.on("data", (chunk) => {
   process.stderr.write(chunk);
 });
 
-function waitForHealth(port, maxAttempts = 30, interval = 200) {
-  let attempts = 0;
+function waitForReady() {
   return new Promise((resolve, reject) => {
-    function check() {
-      attempts++;
-      const req = http.get(`http://127.0.0.1:${port}/health`, (res) => {
-        if (res.statusCode === 200) {
-          res.resume();
-          resolve();
-        } else {
-          retry();
-        }
-      });
-      req.on("error", retry);
-      req.setTimeout(1000, () => {
-        req.destroy();
-        retry();
-      });
-    }
-    function retry() {
-      if (attempts >= maxAttempts) {
-        reject(new Error(`Proxy failed to become ready after ${maxAttempts} attempts`));
-        return;
-      }
-      setTimeout(check, interval);
-    }
-    check();
+    let output = "";
+    proxyProc.stdout.on("data", (chunk) => {
+      output += chunk.toString();
+      const match = output.match(/listening on ([\d.]+):(\d+)/);
+      if (match) resolve(parseInt(match[2], 10));
+    });
+    proxyProc.on("exit", (code) => {
+      reject(new Error(`Proxy exited (code ${code}) before ready`));
+    });
+    setTimeout(() => reject(new Error("Proxy failed to start within 10s")), 10000);
   });
 }
 
+let actualPort;
 try {
-  await waitForHealth(proxyPort);
+  actualPort = await waitForReady();
 } catch (err) {
   process.stderr.write(`${err.message}\n`);
   cleanup(1);
@@ -93,7 +79,7 @@ try {
 
 const claudeEnv = {
   ...process.env,
-  ANTHROPIC_BASE_URL: `http://127.0.0.1:${proxyPort}`,
+  ANTHROPIC_BASE_URL: `http://127.0.0.1:${actualPort}`,
 };
 
 claudeProc = spawn("claude", claudeArgs, {
