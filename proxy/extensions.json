@@ -1,6 +1,7 @@
 {
   "fingerprint-strip": { "enabled": true, "order": 100 },
   "sort-stabilization": { "enabled": true, "order": 200 },
+  "fresh-session-sort": { "enabled": true, "order": 250 },
   "identity-normalization": { "enabled": true, "order": 300 },
   "cache-control-normalize": { "enabled": true, "order": 400 },
   "ttl-management": { "enabled": true, "order": 500 },

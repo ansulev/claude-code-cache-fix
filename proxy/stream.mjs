@@ -29,7 +29,7 @@ function extractTelemetry(event, telemetry) {
   }
 }
 
-async function processLine(line, clientRes, telemetry, extSnapshot, meta) {
+async function processLine(line, clientRes, telemetry, extSnapshot, meta, responseHeaders) {
   if (!line.startsWith("data: ")) {
     const ok = clientRes.write(line + "\n");
     if (!ok) await new Promise((r) => clientRes.once("drain", r));
@@ -60,7 +60,7 @@ async function processLine(line, clientRes, telemetry, extSnapshot, meta) {
     return;
   }
 
-  const ctx = { event, meta, telemetry, responseHeaders: null, drop: false };
+  const ctx = { event, meta, telemetry, responseHeaders: responseHeaders || null, drop: false };
   const originalRef = event;
   await runOnStreamEvent(ctx, extSnapshot);
 
@@ -81,7 +81,7 @@ async function processLine(line, clientRes, telemetry, extSnapshot, meta) {
   if (!ok) await new Promise((r) => clientRes.once("drain", r));
 }
 
-export async function streamResponse(upstreamRes, clientRes, telemetry, extSnapshot, meta) {
+export async function streamResponse(upstreamRes, clientRes, telemetry, extSnapshot, meta, responseHeaders) {
   let buffer = "";
 
   for await (const chunk of upstreamRes) {
@@ -96,13 +96,13 @@ export async function streamResponse(upstreamRes, clientRes, telemetry, extSnaps
         const ok = clientRes.write("\n");
         if (!ok) await new Promise((r) => clientRes.once("drain", r));
       } else {
-        await processLine(line, clientRes, telemetry, extSnapshot, meta);
+        await processLine(line, clientRes, telemetry, extSnapshot, meta, responseHeaders);
       }
     }
   }
 
   if (buffer.length > 0) {
-    await processLine(buffer, clientRes, telemetry, extSnapshot, meta);
+    await processLine(buffer, clientRes, telemetry, extSnapshot, meta, responseHeaders);
   }
 
   clientRes.end();

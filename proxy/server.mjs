@@ -2,7 +2,7 @@ import http from "node:http";
 import config from "./config.mjs";
 import { forwardRequest } from "./upstream.mjs";
 import { streamResponse, createTelemetryRecord } from "./stream.mjs";
-import { loadExtensions, snapshotRegistry, runOnRequest, runOnResponseStart } from "./pipeline.mjs";
+import { loadExtensions, snapshotRegistry, runOnRequest, runOnResponseStart, runOnResponse } from "./pipeline.mjs";
 import { startWatcher } from "./watcher.mjs";
 
 function collectBody(req) {
@@ -76,7 +76,26 @@ async function handleMessages(clientReq, clientRes) {
   clientRes.writeHead(statusCode, responseHeaders);
 
   if (statusCode >= 400) {
-    upstreamRes.pipe(clientRes);
+    if (extSnapshot.length > 0) {
+      const chunks = [];
+      for await (const chunk of upstreamRes) chunks.push(chunk);
+      const rawResponse = Buffer.concat(chunks);
+      let responseBody;
+      try {
+        responseBody = JSON.parse(rawResponse.toString());
+      } catch {
+        responseBody = null;
+      }
+      if (responseBody) {
+        const resCtx = { status: statusCode, headers: responseHeaders, body: responseBody, meta };
+        await runOnResponse(resCtx, extSnapshot);
+        clientRes.end(JSON.stringify(resCtx.body));
+      } else {
+        clientRes.end(rawResponse);
+      }
+    } else {
+      upstreamRes.pipe(clientRes);
+    }
     return;
   }
 
@@ -90,7 +109,7 @@ async function handleMessages(clientReq, clientRes) {
   });
 
   try {
-    await streamResponse(upstreamRes, clientRes, telemetry, extSnapshot, meta);
+    await streamResponse(upstreamRes, clientRes, telemetry, extSnapshot, meta, responseHeaders);
   } catch (err) {
     if (!clientRes.writableEnded) {
       clientRes.destroy(err);
