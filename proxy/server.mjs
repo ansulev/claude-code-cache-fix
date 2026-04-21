@@ -73,13 +73,14 @@ async function handleMessages(clientReq, clientRes) {
     await runOnResponseStart(resCtx, extSnapshot);
   }
 
-  clientRes.writeHead(statusCode, responseHeaders);
+  const isStreaming = (responseHeaders["content-type"] || "").includes("text/event-stream");
 
-  if (statusCode >= 400) {
+  if (!isStreaming) {
+    const chunks = [];
+    for await (const chunk of upstreamRes) chunks.push(chunk);
+    const rawResponse = Buffer.concat(chunks);
+
     if (extSnapshot.length > 0) {
-      const chunks = [];
-      for await (const chunk of upstreamRes) chunks.push(chunk);
-      const rawResponse = Buffer.concat(chunks);
       let responseBody;
       try {
         responseBody = JSON.parse(rawResponse.toString());
@@ -89,15 +90,20 @@ async function handleMessages(clientReq, clientRes) {
       if (responseBody) {
         const resCtx = { status: statusCode, headers: responseHeaders, body: responseBody, meta };
         await runOnResponse(resCtx, extSnapshot);
+        clientRes.writeHead(statusCode, resCtx.headers);
         clientRes.end(JSON.stringify(resCtx.body));
       } else {
+        clientRes.writeHead(statusCode, responseHeaders);
         clientRes.end(rawResponse);
       }
     } else {
-      upstreamRes.pipe(clientRes);
+      clientRes.writeHead(statusCode, responseHeaders);
+      clientRes.end(rawResponse);
     }
     return;
   }
+
+  clientRes.writeHead(statusCode, responseHeaders);
 
   const telemetry = createTelemetryRecord();
   telemetry.requestedModel = requestedModel;
