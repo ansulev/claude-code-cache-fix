@@ -5,6 +5,7 @@
 - **Do not push directly to `main` unless the user explicitly instructs you to do so in the current turn.** Otherwise use feature branches and PRs, even for small fixes.
 - If writing directly to `main` is explicitly authorized, pull/rebase from `origin/main` before any other write action so you start from the current remote tip.
 - Branch naming: `feature/<name>` for features, `fix/<name>` for bugfixes.
+- **Multi-phase feature branches:** For large features with phases, use `feature/<name>-<phase>` sub-branches that merge back into the parent `feature/<name>` branch. Git does not allow nested refs when the parent exists, so use hyphens not slashes for the phase segment. Example: `feature/proxy-v3-extensions` merges into `feature/proxy-v3`, which merges into `main` when the full feature ships. Each sub-branch gets its own PR with Codex review before merging to the parent.
 - PRs require review before merge.
 - Commit messages: lead with what changed and why, not how.
 - Multi-phase issues: use `Ref #N` (not `Closes #N`) until the final phase PR.

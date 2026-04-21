@@ -1,3 +1,5 @@
+import { runOnStreamEvent } from "./pipeline.mjs";
+
 export function createTelemetryRecord() {
   return {
     model: null,
@@ -10,18 +12,7 @@ export function createTelemetryRecord() {
   };
 }
 
-function tryParseSSEEvent(line, telemetry) {
-  if (!line.startsWith("data: ")) return;
-  const jsonStr = line.slice(6);
-  if (jsonStr === "[DONE]") return;
-
-  let event;
-  try {
-    event = JSON.parse(jsonStr);
-  } catch {
-    return;
-  }
-
+function extractTelemetry(event, telemetry) {
   if (event.type === "message_start" && event.message) {
     const msg = event.message;
     telemetry.model = msg.model || null;
@@ -38,7 +29,59 @@ function tryParseSSEEvent(line, telemetry) {
   }
 }
 
-export async function streamResponse(upstreamRes, clientRes, telemetry) {
+async function processLine(line, clientRes, telemetry, extSnapshot, meta, responseHeaders) {
+  if (!line.startsWith("data: ")) {
+    const ok = clientRes.write(line + "\n");
+    if (!ok) await new Promise((r) => clientRes.once("drain", r));
+    return;
+  }
+
+  const jsonStr = line.slice(6);
+  if (jsonStr === "[DONE]") {
+    const ok = clientRes.write(line + "\n");
+    if (!ok) await new Promise((r) => clientRes.once("drain", r));
+    return;
+  }
+
+  let event;
+  try {
+    event = JSON.parse(jsonStr);
+  } catch {
+    const ok = clientRes.write(line + "\n");
+    if (!ok) await new Promise((r) => clientRes.once("drain", r));
+    return;
+  }
+
+  extractTelemetry(event, telemetry);
+
+  if (!extSnapshot || extSnapshot.length === 0) {
+    const ok = clientRes.write(line + "\n");
+    if (!ok) await new Promise((r) => clientRes.once("drain", r));
+    return;
+  }
+
+  const ctx = { event, meta, telemetry, responseHeaders: responseHeaders || null, drop: false };
+  const originalRef = event;
+  await runOnStreamEvent(ctx, extSnapshot);
+
+  if (ctx.drop) return;
+
+  let output;
+  if (ctx.event === originalRef) {
+    output = line + "\n";
+  } else {
+    try {
+      output = "data: " + JSON.stringify(ctx.event) + "\n";
+    } catch {
+      output = line + "\n";
+    }
+  }
+
+  const ok = clientRes.write(output);
+  if (!ok) await new Promise((r) => clientRes.once("drain", r));
+}
+
+export async function streamResponse(upstreamRes, clientRes, telemetry, extSnapshot, meta, responseHeaders) {
   let buffer = "";
 
   for await (const chunk of upstreamRes) {
@@ -49,17 +92,17 @@ export async function streamResponse(upstreamRes, clientRes, telemetry) {
     buffer = lines.pop();
 
     for (const line of lines) {
-      tryParseSSEEvent(line, telemetry);
-    }
-
-    const ok = clientRes.write(chunk);
-    if (!ok) {
-      await new Promise((resolve) => clientRes.once("drain", resolve));
+      if (line === "") {
+        const ok = clientRes.write("\n");
+        if (!ok) await new Promise((r) => clientRes.once("drain", r));
+      } else {
+        await processLine(line, clientRes, telemetry, extSnapshot, meta, responseHeaders);
+      }
     }
   }
 
   if (buffer.length > 0) {
-    tryParseSSEEvent(buffer, telemetry);
+    await processLine(buffer, clientRes, telemetry, extSnapshot, meta, responseHeaders);
   }
 
   clientRes.end();
