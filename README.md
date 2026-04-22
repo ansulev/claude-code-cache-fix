@@ -4,9 +4,76 @@
 
 English | [中文](./README.zh.md) | [한국어](./README.ko.md) | [Português](./docs/guia-pt-br.md)
 
-Fixes prompt cache regressions in [Claude Code](https://github.com/anthropics/claude-code) that cause **up to 20x cost increase** on resumed sessions, plus monitoring for silent context degradation. Confirmed through v2.1.112. Opus 4.7 compatible.
+Cache optimization proxy and interceptor for [Claude Code](https://github.com/anthropics/claude-code). Fixes prompt cache bugs that cause excessive quota burn, stabilizes the request prefix, and monitors for silent regressions. Works with all CC versions including the v2.1.113+ Bun binary.
 
-> **Opus 4.7 advisory:** Our metered data shows 4.7 burns Q5h quota at **~2.4x the rate of 4.6** for equivalent visible token counts. Two factors: a new tokenizer (up to 35% more tokens, [documented](https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7)) and adaptive thinking overhead (~105%, not documented in usage response). Workaround: `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` (may reduce quality). Image stripping (`CACHE_FIX_IMAGE_KEEP_LAST`) is even more important on 4.7 due to high-res image support increasing image token counts. See [Discussion #25](https://github.com/cnighswonger/claude-code-cache-fix/discussions/25) for full analysis.
+> **v3.0.0** adds a local HTTP proxy with hot-reloadable extensions. This is the recommended path for CC v2.1.113+ where the preload interceptor no longer works. A/B tested on v2.1.117: **95.5% cache hit rate through proxy vs 82.3% direct** on first warm turn. [Full release notes →](https://github.com/cnighswonger/claude-code-cache-fix/releases/tag/v3.0.0)
+
+> **Opus 4.7 advisory:** Metered data shows 4.7 burns Q5h quota at **~2.4x the rate of 4.6** for equivalent visible token counts. Two factors: a new tokenizer (up to 35% more tokens, [documented](https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7)) and adaptive thinking overhead (~105%, not documented in usage response). Workaround: `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1` (may reduce quality). See [Discussion #25](https://github.com/cnighswonger/claude-code-cache-fix/discussions/25) for full analysis.
+
+## Quick Start: Proxy (recommended for CC v2.1.113+)
+
+The proxy works with any CC version — Node.js or Bun binary. It sits between Claude Code and the Anthropic API, applying cache fixes as hot-reloadable extensions.
+
+```bash
+# Install
+npm install -g claude-code-cache-fix
+
+# Start the proxy (runs on localhost:9801)
+node "$(npm root -g)/claude-code-cache-fix/proxy/server.mjs" &
+
+# Launch Claude Code through it
+ANTHROPIC_BASE_URL=http://127.0.0.1:9801 claude
+```
+
+That's it. The proxy applies all 7 cache-fix extensions automatically. No wrapper scripts, no `NODE_OPTIONS`, no preload.
+
+### What the proxy does
+
+On every request passing through, 7 extensions run in order:
+
+| Extension | What it fixes |
+|-----------|--------------|
+| `fingerprint-strip` | Removes unstable cc_version fingerprint from system prompt |
+| `sort-stabilization` | Deterministic ordering of tool and MCP definitions |
+| `ttl-management` | Detects server TTL tier, injects correct cache_control markers |
+| `identity-normalization` | Normalizes message identity fields for prefix stability |
+| `fresh-session-sort` | Fixes non-deterministic ordering on first turn |
+| `cache-control-normalize` | Normalizes cache_control markers across messages |
+| `cache-telemetry` | Extracts cache stats from response headers → `~/.claude/quota-status.json` |
+
+Extensions are hot-reloadable — add, remove, or modify `.mjs` files in `proxy/extensions/` and changes apply to the next request without restarting. Configuration in `proxy/extensions.json`.
+
+### Running as a service
+
+For persistent use, run the proxy in the background:
+
+```bash
+# Start in background with logging
+nohup node "$(npm root -g)/claude-code-cache-fix/proxy/server.mjs" > /tmp/cache-fix-proxy.log 2>&1 &
+
+# Add to your shell profile
+echo 'export ANTHROPIC_BASE_URL=http://127.0.0.1:9801' >> ~/.bashrc
+```
+
+### Health check
+
+```bash
+curl http://127.0.0.1:9801/health
+# {"status":"ok"}
+```
+
+## Quick Start: Preload (for CC v2.1.112 and earlier)
+
+If you're on a Node.js-based CC version (v2.1.112 or earlier), the preload interceptor still works and requires no proxy:
+
+```bash
+npm install -g claude-code-cache-fix
+NODE_OPTIONS="--import claude-code-cache-fix" claude
+```
+
+> **Note:** The preload does NOT work on CC v2.1.113+ (Bun binary). Use the proxy path above.
+
+See [Preload Setup Details](#preload-setup-details) below for wrapper scripts, shell aliases, and Windows instructions.
 
 ## Security model
 
@@ -34,7 +101,12 @@ Three bugs cause this:
 
 Additionally, images read via the Read tool persist as base64 in conversation history and are sent on every subsequent API call, compounding token costs silently.
 
-## Installation
+## Preload Setup Details
+
+<details>
+<summary>Expand for preload interceptor setup (CC v2.1.112 and earlier only)</summary>
+
+### Installation
 
 Requires Node.js >= 18 and Claude Code installed via npm (not the standalone binary).
 
@@ -42,9 +114,9 @@ Requires Node.js >= 18 and Claude Code installed via npm (not the standalone bin
 npm install -g claude-code-cache-fix
 ```
 
-## Usage
+### Usage
 
-The fix works as a Node.js preload module that intercepts API requests before they leave your machine.
+The preload works as a Node.js module that intercepts API requests before they leave your machine.
 
 ### Option A: Wrapper script (recommended)
 
@@ -183,6 +255,8 @@ Then set in VS Code `settings.json`:
 - **Fingerprint fix**: Fixed in v1.11.0 — the safety check now handles both the v2.1.108+ extraction method and the legacy method. No workaround needed. (Previously required `CACHE_FIX_SKIP_FINGERPRINT=1`.)
 
 Credit: [@JEONG-JIWOO](https://github.com/JEONG-JIWOO) and [@X-15](https://github.com/X-15) for the VS Code extension investigation and C wrapper ([#16](https://github.com/cnighswonger/claude-code-cache-fix/issues/16)).
+
+</details>
 
 ## How it works
 
