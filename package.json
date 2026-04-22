@@ -1,7 +1,7 @@
 {
   "name": "claude-code-cache-fix",
-  "version": "2.0.6",
-  "description": "Fixes prompt cache regression in Claude Code that causes up to 20x cost increase on resumed sessions",
+  "version": "3.0.0",
+  "description": "Cache optimization proxy and interceptor for Claude Code. Fixes prompt cache bugs, stabilizes prefix, reduces quota burn.",
   "type": "module",
   "exports": "./preload.mjs",
   "main": "./preload.mjs",
